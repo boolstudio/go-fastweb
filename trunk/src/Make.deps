@@ -1,0 +1,3 @@
+fastcgi.install:
+fastweb/template.install:
+fastweb.install: fastcgi.install fastweb/template.install
