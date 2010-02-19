@@ -1,0 +1,54 @@
+body {
+	font-family: Arial, Helvetica, sans-serif;
+	font-size: 0.8em;
+	margin: 0;
+	min-width: 600px;
+}
+
+div#mainbody {
+	padding: 0.5em 1.5em 1.5em;
+}
+
+div#navigation div {
+	border-right: 1px solid #5599dd;
+	float: left;
+	position: relative;
+}
+
+div#navigation {
+	background-color: #6daae7;
+	float: left;
+	width: 100%;
+}
+
+div#navigation div a, .topTab {
+	color: #ffffff;
+	cursor: pointer;
+	display: block;
+	font-weight: bold;
+	padding: 5px 15px;
+	text-decoration: none;
+}
+
+a {
+	outline-color: -moz-use-text-color;
+	outline-style: none;
+	outline-width: medium;
+}
+
+#footer {
+	border-top: 3px solid #5599dd;
+	color: #999999;
+	margin: 2em 0 0;
+	padding: 2px 0 0;
+	text-align: center;
+}
+
+div#content {
+	margin: 20px 30px;
+}
+
+.clear {
+	clear:both;
+}
+
