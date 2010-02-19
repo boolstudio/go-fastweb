@@ -645,6 +645,42 @@ func (st *state) findVar(s string) reflect.Value {
 	return data
 }
 
+func _getMatchValue(data reflect.Value, typ reflect.Type) reflect.Value {
+	if typ == data.Type() {
+		return data
+	}
+	data = reflect.Indirect(data)
+	if t, ok := data.Type().(*reflect.StructType); ok {
+		n := t.NumField()
+		for i := 0; i < n; i++ {
+			f := t.Field(i)
+			if !f.Anonymous {
+				continue
+			}
+			v := getMatchValue(data.(*reflect.StructValue).Field(i), typ)
+			if v != nil {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
+func getMatchValue(data reflect.Value, typ reflect.Type) reflect.Value {
+	origTyp := typ
+	_, isPtr := typ.(*reflect.PtrType)
+	if isPtr {
+		typ = typ.(*reflect.PtrType).Elem()
+	}
+	v := _getMatchValue(data, typ)
+	if v != nil && isPtr {
+		vv := reflect.MakeZero(origTyp)
+		vv.(*reflect.PtrValue).PointTo(v)
+		return vv
+	}
+	return v
+}
+
 // See if name is a method of the value at some level of indirection.
 // The return values are the result of the call (which may be nil if
 // there's trouble) and whether a method of the right name exists with
@@ -669,8 +705,9 @@ func callMethod(data reflect.Value, name string) (result reflect.Value, found bo
 				if method.Name == name {
 					found = true // we found the name regardless
 					// does receiver type match? (pointerness might be off)
-					if typ == method.Type.In(0) {
-						return call(data, method, param), found
+					//if typ == method.Type.In(0) {
+					if val := getMatchValue(data, method.Type.In(0)); val != nil {
+						return call(val, method, param), found
 					}
 				}
 			}
@@ -735,6 +772,7 @@ func (t *Template) varValue(name string, st *state) reflect.Value {
 	field := st.findVar(name)
 	if field == nil {
 		if st.parent == nil {
+			return reflect.NewValue("")
 			t.execError(st, t.linenum, "name not found: %s", name)
 		}
 		return t.varValue(name, st.parent)

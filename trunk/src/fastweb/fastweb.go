@@ -6,48 +6,54 @@ package fastweb
 
 import (
 	"fastcgi"
-	"os"
-	"strings"
-	"reflect"
-	"unsafe"
-	"strconv"
-	"fmt"
 	"fastweb/template"
+	"fmt"
+	"io"
 	"io/ioutil"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"unsafe"
 )
 
 type ControllerInterface interface {
-	PageTitle() string
-	Layout() string
-	SetEnv(env *env)
+	Init()
 	DefaultAction() string
-	Render() os.Error
+	SetEnv(env *env)
+	PreFilter()
+	Render()
+	SetContext(ctxt ControllerInterface)
 }
 
 type Controller struct {
 	Path        string
-	Name        string
-	LName       string
+	CName       string
+	LCName      string
 	Action      string
 	LAction     string
 	Params      []string
+	PageTitle   string
+	Layout      string
 	ContentType string
-	D           interface{}
+	D           ControllerInterface
 	Request     *fastcgi.Request
 	info        *controllerInfo
 	app         *Application
 	preRenered  bool
 }
 
-func (c *Controller) PageTitle() string { return "" }
+func (c *Controller) Init() {
+	c.PageTitle = ""
+	c.Layout = "default"
+	c.ContentType = "text/html"
+}
 
-func (c *Controller) Layout() string { return "default" }
-
-func (c *Controller) DefaultAction() string { return "index" }
+func (c *Controller) DefaultAction() string { return "Index" }
 
 func (c *Controller) SetEnv(env *env) {
-	c.Name = env.controller
-	c.LName = env.lcontroller
+	c.CName = env.controller
+	c.LCName = env.lcontroller
 	c.Action = env.action
 	c.LAction = env.laction
 	c.Path = env.path
@@ -55,6 +61,9 @@ func (c *Controller) SetEnv(env *env) {
 	c.Request = env.request
 	c.info = env.cinfo
 	c.app = env.app
+}
+
+func (c *Controller) PreFilter() {
 }
 
 type tmplInfo struct {
@@ -91,54 +100,64 @@ func loadTemplate(fname string) (*template.Template, os.Error) {
 	return ti.tmpl, nil
 }
 
+func (c *Controller) SetContext(ctxt ControllerInterface) {
+	if c.D == nil {
+		c.D = ctxt
+	}
+}
+
+func (c *Controller) preRender() {
+	if !c.preRenered {
+		io.WriteString(c.Request.Stdout, "Content-type: " + c.ContentType + "\r\n\r\n")
+		c.preRenered = true
+	}
+}
+
 func (c *Controller) RenderContent() string {
 	c.preRender()
 
-	fname := "views/" + c.LName + "/" + c.LAction + ".tpl"
+	fname := "views/" + c.LCName + "/" + c.LAction + ".tpl"
 	t, e := loadTemplate(fname)
 	if e != nil {
 	}
 
 	if t != nil {
-		t.Execute(c, c.Request.Stdout)
+		t.Execute(c.D, c.Request.Stdout)
 	}
 
 	return ""
 }
 
 func (c *Controller) RenderElement(name string) string {
-	fmt.Fprintf(c.Request.Stdout, name)
+	fname := "views/elements/" + name + ".tpl"
+	t, e := loadTemplate(fname)
+	if e == nil && t != nil {
+		t.Execute(c.D, c.Request.Stdout)
+	}
+
 	return ""
 }
 
 func (c *Controller) RenderControllerElement(name string) string {
-	fmt.Fprintf(c.Request.Stdout, name)
+	fname := "views/" + c.LCName + "/elements/" + name + ".tpl"
+	t, e := loadTemplate(fname)
+	if e == nil && t != nil {
+		t.Execute(c.D, c.Request.Stdout)
+	}
+
 	return ""
 }
 
-func (c *Controller) preRender() {
-	if !c.preRenered {
-		ct := c.ContentType
-		if ct == "" {
-			ct = "text/html"
-		}
-		fmt.Fprintf(c.Request.Stdout, "Content-type: %s\r\n\r\n", ct)
-		c.preRenered = true
-	}
-}
-
-func (c *Controller) Render() os.Error {
+func (c *Controller) Render() {
 	c.preRender()
 
-	fname := "views/layouts/" + c.Layout() + ".tpl"
+	fname := "views/layouts/" + c.Layout + ".tpl"
 	t, e := loadTemplate(fname)
 	if e != nil {
 		c.RenderContent()
 	} else {
-		t.Execute(c, c.Request.Stdout)
+		t.Execute(c.D, c.Request.Stdout)
 	}
-
-	return nil
 }
 
 const (
@@ -273,7 +292,10 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 	env.cinfo = cinfo
 	env.app = a
 
+	c.Init()
 	c.SetEnv(env)
+
+	c.PreFilter()
 
 	eval := minfo.method.Call(pv)[0].(*reflect.InterfaceValue)
 	if !eval.IsNil() {
@@ -281,6 +303,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		return unsafe.Unreflect(elemval.Type(), unsafe.Pointer(elemval.Addr())).(os.Error)
 	}
 
+	c.SetContext(c)
 	c.Render()
 
 	return nil
@@ -315,7 +338,7 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		m := ptrt.Method(i)
 		name := m.Name
 		switch name {
-		case "PageTitle", "Layout", "SetContext", "Render", "DefaultAction":
+		case "SetEnv", "Render", "DefaultAction", "Init":
 			continue
 		}
 		mt := m.Type

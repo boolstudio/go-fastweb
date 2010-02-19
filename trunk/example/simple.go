@@ -6,28 +6,41 @@ package main
 
 import (
         "fastweb"
-        "fmt"
         "os"
 )
 
-type Test struct {
+type Products struct {
 	fastweb.Controller
-	a int
+	Name string
+	Brand string
+	Features []string
+	Specifications []string
+	Image string
 }
 
-func (t *Test) DefaultAction() string {
-	return "test"
-}
-
-func (t *Test) Test(id int, user string, passwd string) os.Error {
-	fmt.Printf("%d %s %s\n", id, user, passwd)
+func (p *Products) View(id string) os.Error {
+	if id == "ah64" {
+		p.Name = "RC Apache AH64 4-Channel Electric Helicoper"
+		p.Brand = "Colco"
+		p.Features = []string{
+			"4 channel radio control duel propeller system",
+			"Full movement controll: forward, backward, left, right, up and down",
+			"Replica design",
+			"Revolutionary co-axial rotor technology",
+		}
+		p.Specifications = []string{
+			"Dimensions: L 16 Inches X W 5.5 Inches x H 6.5 Inches",
+			"Battery Duration: 10 min",
+			"Range: 120 Feet",
+		}
+		p.Image = "/img/ah64.jpg"
+	}
 	return nil
 }
 
 func main() {
 	a := fastweb.NewApplication()
-	t := &Test{a:1}
-	a.RegisterController(t)
+	a.RegisterController(&Products{})
         a.Run(":12345")
 }
 
