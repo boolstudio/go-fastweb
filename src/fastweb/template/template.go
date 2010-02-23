@@ -646,10 +646,10 @@ func (st *state) findVar(s string) reflect.Value {
 }
 
 func _getMatchValue(data reflect.Value, typ reflect.Type) reflect.Value {
+	data = reflect.Indirect(data)
 	if typ == data.Type() {
 		return data
 	}
-	data = reflect.Indirect(data)
 	if t, ok := data.Type().(*reflect.StructType); ok {
 		n := t.NumField()
 		for i := 0; i < n; i++ {
