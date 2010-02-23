@@ -1,10 +1,10 @@
-{.section Name}
-Name: {Name}<br/>
-Manufacturer: {Brand}<br/>
-{.section Image}
-<img src="{Image}"><br/>
+{.section name}
+Name: {name}<br/>
+Manufacturer: {brand}<br/>
+{.section image}
+<img src="{image}"><br/>
 {.end}
-{.section Features}
+{.section features}
 Features:<br/>
 <ul>
 {.repeated section @}
@@ -12,7 +12,7 @@ Features:<br/>
 {.end}
 </ul>
 {.end}
-{.section Specifications}
+{.section specifications}
 Specifications:<br/>
 <ul>
 {.repeated section @}

@@ -10,11 +10,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"unsafe"
+)
+
+const (
+	IntParam = 1
+	StrParam = 2
 )
 
 type ControllerInterface interface {
@@ -26,144 +32,15 @@ type ControllerInterface interface {
 	SetContext(ctxt ControllerInterface)
 }
 
-type Controller struct {
-	Path        string
-	CName       string
-	LCName      string
-	Action      string
-	LAction     string
-	Params      []string
-	PageTitle   string
-	Layout      string
-	ContentType string
-	D           ControllerInterface
-	Request     *fastcgi.Request
-	info        *controllerInfo
-	app         *Application
-	preRenered  bool
+type Error interface {
+	os.Error
+	Type() string
 }
 
-func (c *Controller) Init() {
-	c.PageTitle = ""
-	c.Layout = "default"
-	c.ContentType = "text/html"
+type ErrorStruct struct {
+	typ string
+	message string
 }
-
-func (c *Controller) DefaultAction() string { return "Index" }
-
-func (c *Controller) SetEnv(env *env) {
-	c.CName = env.controller
-	c.LCName = env.lcontroller
-	c.Action = env.action
-	c.LAction = env.laction
-	c.Path = env.path
-	c.Params = env.params
-	c.Request = env.request
-	c.info = env.cinfo
-	c.app = env.app
-}
-
-func (c *Controller) PreFilter() {
-}
-
-type tmplInfo struct {
-	tmpl  *template.Template
-	mtime uint64
-}
-
-var tmplCache map[string]*tmplInfo = make(map[string]*tmplInfo)
-
-func loadTemplate(fname string) (*template.Template, os.Error) {
-	dir, e := os.Stat(fname)
-	if e != nil {
-		return nil, e
-	}
-	if !dir.IsRegular() {
-		return nil, os.NewError("'" + fname + "' is not a regular file")
-	}
-	ti, _ := tmplCache[fname]
-	if ti == nil || dir.Mtime_ns > ti.mtime {
-		bytes, e := ioutil.ReadFile(fname)
-		if e != nil {
-			return nil, e
-		}
-		t, e := template.Parse(string(bytes), nil)
-		if e != nil {
-			return nil, e
-		}
-		ti = &tmplInfo{
-			mtime: dir.Mtime_ns,
-			tmpl: t,
-		}
-		tmplCache[fname] = ti
-	}
-	return ti.tmpl, nil
-}
-
-func (c *Controller) SetContext(ctxt ControllerInterface) {
-	if c.D == nil {
-		c.D = ctxt
-	}
-}
-
-func (c *Controller) preRender() {
-	if !c.preRenered {
-		io.WriteString(c.Request.Stdout, "Content-type: " + c.ContentType + "\r\n\r\n")
-		c.preRenered = true
-	}
-}
-
-func (c *Controller) RenderContent() string {
-	c.preRender()
-
-	fname := "views/" + c.LCName + "/" + c.LAction + ".tpl"
-	t, e := loadTemplate(fname)
-	if e != nil {
-	}
-
-	if t != nil {
-		t.Execute(c.D, c.Request.Stdout)
-	}
-
-	return ""
-}
-
-func (c *Controller) RenderElement(name string) string {
-	fname := "views/elements/" + name + ".tpl"
-	t, e := loadTemplate(fname)
-	if e == nil && t != nil {
-		t.Execute(c.D, c.Request.Stdout)
-	}
-
-	return ""
-}
-
-func (c *Controller) RenderControllerElement(name string) string {
-	fname := "views/" + c.LCName + "/elements/" + name + ".tpl"
-	t, e := loadTemplate(fname)
-	if e == nil && t != nil {
-		t.Execute(c.D, c.Request.Stdout)
-	}
-
-	return ""
-}
-
-func (c *Controller) Render() {
-	c.preRender()
-
-	fname := "views/layouts/" + c.Layout + ".tpl"
-	t, e := loadTemplate(fname)
-	if e != nil {
-		c.RenderContent()
-	} else {
-		t.Execute(c.D, c.Request.Stdout)
-	}
-}
-
-const (
-	IntParam = 1
-	StrParam = 2
-)
 
 type methodInfo struct {
 	name       string
@@ -193,8 +70,178 @@ type env struct {
 	laction     string
 	params      []string
 	request     *fastcgi.Request
-	cinfo       *controllerInfo
-	app         *Application
+}
+
+type Controller struct {
+	Path        string
+	Name        string
+	LName       string
+	Action      string
+	LAction     string
+	Params      []string
+	PageTitle   string
+	Layout      string
+	ContentType string
+	ctxt        ControllerInterface
+	Request     *fastcgi.Request
+	preRenered  bool
+}
+
+func NewError(typ string, message string) *ErrorStruct {
+	return &ErrorStruct{typ, message}
+}
+
+func (e *ErrorStruct) String() string { return e.message }
+
+func (e *ErrorStruct) Type() string { return e.typ }
+
+func (c *Controller) Init() {
+	c.PageTitle = ""
+	c.Layout = "default"
+	c.ContentType = "text/html"
+}
+
+func (c *Controller) DefaultAction() string { return "Index" }
+
+func (c *Controller) SetEnv(env *env) {
+	c.Name = env.controller
+	c.LName = env.lcontroller
+	c.Action = env.action
+	c.LAction = env.laction
+	c.Path = env.path
+	c.Params = env.params
+	c.Request = env.request
+}
+
+func (c *Controller) PreFilter() {}
+
+type tmplInfo struct {
+	tmpl  *template.Template
+	mtime uint64
+}
+
+var tmplCache map[string]*tmplInfo = make(map[string]*tmplInfo)
+
+func loadTemplate(fname string) (*template.Template, os.Error) {
+	dir, e := os.Stat(fname)
+	if e != nil {
+		return nil, e
+	}
+	if !dir.IsRegular() {
+		return nil, NewError("Generic", "'"+fname+"' is not a regular file")
+	}
+	ti, _ := tmplCache[fname]
+	if ti == nil || dir.Mtime_ns > ti.mtime {
+		bytes, e := ioutil.ReadFile(fname)
+		if e != nil {
+			return nil, e
+		}
+		t, e := template.Parse(string(bytes), nil)
+		if e != nil {
+			return nil, e
+		}
+		ti = &tmplInfo{
+			mtime: dir.Mtime_ns,
+			tmpl: t,
+		}
+		tmplCache[fname] = ti
+	}
+	return ti.tmpl, nil
+}
+
+func (c *Controller) SetContext(ctxt ControllerInterface) {
+	if c.ctxt == nil {
+		c.ctxt = ctxt
+	}
+}
+
+func (c *Controller) preRender() {
+	if !c.preRenered {
+		io.WriteString(c.Request.Stdout, "Content-type: "+c.ContentType+"\r\n\r\n")
+		c.preRenered = true
+	}
+}
+
+func (c *Controller) RenderContent() string {
+	c.preRender()
+
+	fname := "views/" + c.LName + "/" + c.LAction + ".tpl"
+	t, e := loadTemplate(fname)
+	if e != nil {
+		// Dump c.ctxt contents
+	}
+
+	if t != nil {
+		t.Execute(c.ctxt, c.Request.Stdout)
+	}
+
+	return ""
+}
+
+func (c* Controller) renderTemplate(fname string) {
+	t, e := loadTemplate(fname)
+	if e == nil {
+		t.Execute(c.ctxt, c.Request.Stdout)
+	} else {
+		log.Stderrf("failed to load template %s: %s", fname, e)
+	}
+}
+
+func (c *Controller) RenderElement(name string) string {
+	c.renderTemplate("views/elements/" + name + ".tpl")
+	return ""
+}
+
+func (c *Controller) RenderControllerElement(name string) string {
+	c.renderTemplate("views/" + c.LName + "/elements/" + name + ".tpl")
+	return ""
+}
+
+func (c *Controller) Render() {
+	c.preRender()
+
+	fname := "views/layouts/" + c.Layout + ".tpl"
+	t, e := loadTemplate(fname)
+	if e != nil {
+		log.Stderrf("failed to load layout template %s: %s", fname, e)
+		c.RenderContent()
+	} else {
+		t.Execute(c.ctxt, c.Request.Stdout)
+	}
+}
+
+type ErrorHandler struct {
+	Controller
+	typ string
+}
+
+func NewErrorHandler(e Error, r *fastcgi.Request) *ErrorHandler{
+	eh := &ErrorHandler{
+		typ: e.Type(),
+	}
+	eh.Request = r
+	return eh
+}
+
+func (eh *ErrorHandler) RenderContent() string {
+	eh.preRender()
+
+	fname := "views/errors/" + eh.typ + ".tpl"
+	t, e := loadTemplate(fname)
+	if e != nil {
+		var msg string
+		switch eh.typ {
+		case "PageNotFound":
+			msg = "Hmm, the page you’re looking for can't be found."
+		default:
+			msg = "We're sorry, but there was an error processing your request. Please try again later."
+		}
+		fmt.Fprintf(eh.Request.Stdout, "%s", msg)
+	} else {
+		t.Execute(eh, eh.Request.Stdout)
+	}
+
+	return ""
 }
 
 func titleCase(s string) string {
@@ -208,7 +255,7 @@ func titleCase(s string) string {
 	return s
 }
 
-func getEnv(r *fastcgi.Request) *env {
+func (a *Application) getEnv(r *fastcgi.Request) *env {
 	var params []string
 	var lname string
 	var laction string
@@ -244,7 +291,7 @@ func getEnv(r *fastcgi.Request) *env {
 }
 
 func (a *Application) route(r *fastcgi.Request) os.Error {
-	env := getEnv(r)
+	env := a.getEnv(r)
 
 	if env.controller == "" {
 		env.controller = a.defaultController
@@ -252,7 +299,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	cinfo, _ := a.controllerMap[env.controller]
 	if cinfo == nil {
-		return os.NewError("controller class '" + env.controller + "' not found")
+		return NewError("PageNotFound", "controller class '"+env.controller+"' not found")
 	}
 
 	cval := reflect.NewValue(cinfo.controller)
@@ -265,11 +312,11 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	minfo, _ := cinfo.methodMap[env.action]
 	if minfo == nil {
-		return os.NewError("action '" + env.action + "' is not implemented in controller '" + env.controller + "'")
+		return NewError("PageNotFound", "action '"+env.action+"' is not implemented in controller '"+env.controller+"'")
 	}
 
 	if minfo.nparams > len(env.params) {
-		return os.NewError("not enough parameter")
+		return NewError("PageNotFound", "not enough parameter")
 	}
 
 	pv := make([]reflect.Value, minfo.nparams+1)
@@ -283,14 +330,11 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		case IntParam:
 			x, e2 := strconv.Atoi(p)
 			if e2 != nil {
-				return os.NewError(fmt.Sprintf("parameter %d must be an integer, input: %s", i + 1, p))
+				return NewError("PageNotFound", fmt.Sprintf("parameter %d must be an integer, input: %s", i+1, p))
 			}
 			pv[i+1] = reflect.NewValue(x)
 		}
 	}
-
-	env.cinfo = cinfo
-	env.app = a
 
 	c.Init()
 	c.SetEnv(env)
@@ -313,6 +357,17 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 	e := a.route(r)
 
 	if e != nil {
+		var ee Error
+		if e, ok := e.(Error); ok {
+			ee = e
+		} else {
+			ee = NewError("Generic", e.String())
+		}
+		log.Stderrf("%s", e.String())
+		eh := NewErrorHandler(ee, r)
+		eh.Init()
+		eh.SetContext(eh)
+		eh.Render()
 	}
 
 	return true
@@ -338,7 +393,7 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		m := ptrt.Method(i)
 		name := m.Name
 		switch name {
-		case "SetEnv", "Render", "DefaultAction", "Init":
+		case "SetEnv", "Render", "DefaultAction", "Init", "PreFilter", "SetContext":
 			continue
 		}
 		mt := m.Type
