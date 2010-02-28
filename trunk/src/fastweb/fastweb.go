@@ -5,9 +5,11 @@
 package fastweb
 
 import (
+	"container/vector"
 	"fastcgi"
 	"fastweb/template"
 	"fmt"
+	"http"
 	"io"
 	"io/ioutil"
 	"log"
@@ -70,6 +72,7 @@ type env struct {
 	laction     string
 	params      []string
 	request     *fastcgi.Request
+	form	    map[string][]string
 }
 
 type Controller struct {
@@ -82,6 +85,7 @@ type Controller struct {
 	PageTitle   string
 	Layout      string
 	ContentType string
+	Form	    map[string][]string
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
 	preRenered  bool
@@ -111,6 +115,7 @@ func (c *Controller) SetEnv(env *env) {
 	c.Path = env.path
 	c.Params = env.params
 	c.Request = env.request
+	c.Form = env.form
 }
 
 func (c *Controller) PreFilter() {}
@@ -220,6 +225,8 @@ func NewErrorHandler(e Error, r *fastcgi.Request) *ErrorHandler{
 		typ: e.Type(),
 	}
 	eh.Request = r
+	eh.Init()
+	eh.SetContext(eh)
 	return eh
 }
 
@@ -255,12 +262,84 @@ func titleCase(s string) string {
 	return s
 }
 
+func parseKeyValueString(m map[string]*vector.StringVector, s string) (os.Error) {
+	if s == "" {
+		return nil
+	}
+
+	// copied from pkg/http/request.go
+	for _, kv := range strings.Split(s, "&", 0) {
+		if kv == "" {
+			continue
+		}
+		kvPair := strings.Split(kv, "=", 2)
+
+		var key, value string
+		var e os.Error
+		key, e = http.URLUnescape(kvPair[0])
+		if e == nil && len(kvPair) > 1 {
+			value, e = http.URLUnescape(kvPair[1])
+		}
+		if e != nil {
+			return e
+		}
+
+		vec, ok := m[key]
+		if !ok {
+			vec = new(vector.StringVector)
+			m[key] = vec
+		}
+		vec.Push(value)
+	}
+
+	return nil
+}
+
+func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
+	m := make(map[string]*vector.StringVector)
+
+	s := r.Params["QUERY_STRING"]
+	if s != "" {
+		e := parseKeyValueString(m, s)
+		if e != nil {
+			return nil, e
+		}
+	}
+
+	if r.Params["REQUEST_METHOD"] == "POST" {
+		var b []byte
+		var e os.Error
+		if b, e = ioutil.ReadAll(r.Stdin); e != nil {
+			return nil, e
+		}
+		e = parseKeyValueString(m, string(b))
+		if e != nil {
+			return nil, e
+		}
+	}
+
+	var form map[string][]string
+	form = make(map[string][]string)
+
+	for k, vec := range m {
+		form[k] = vec.Data()
+	}
+
+        return form, nil
+}
+
 func (a *Application) getEnv(r *fastcgi.Request) *env {
 	var params []string
 	var lname string
 	var laction string
 
 	path, _ := r.Params["REQUEST_URI"]
+	p := strings.Split(path, "?", 2)
+	if len(p) > 1 {
+		path = p[0]
+		r.Params["QUERY_STRING"] = p[1]
+	}
+
 	pparts := strings.Split(path, "/", 0)
 	n := len(pparts)
 	if n > 1 {
@@ -279,6 +358,8 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	name := titleCase(lname)
 	action := titleCase(laction)
 
+	form, _ := parseForm(r)
+
 	return &env{
 		path: path,
 		controller: name,
@@ -287,6 +368,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		laction: laction,
 		params: params,
 		request: r,
+		form: form,
 	}
 }
 
@@ -365,8 +447,6 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 		}
 		log.Stderrf("%s", e.String())
 		eh := NewErrorHandler(ee, r)
-		eh.Init()
-		eh.SetContext(eh)
 		eh.Render()
 	}
 
