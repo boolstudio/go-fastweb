@@ -307,14 +307,18 @@ func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 	}
 
 	if r.Params["REQUEST_METHOD"] == "POST" {
-		var b []byte
-		var e os.Error
-		if b, e = ioutil.ReadAll(r.Stdin); e != nil {
-			return nil, e
-		}
-		e = parseKeyValueString(m, string(b))
-		if e != nil {
-			return nil, e
+		switch r.Params["CONTENT_TYPE"] {
+		case "application/x-www-form-urlencoded":
+			var b []byte
+			var e os.Error
+			if b, e = ioutil.ReadAll(r.Stdin); e != nil {
+				return nil, e
+			}
+			e = parseKeyValueString(m, string(b))
+			if e != nil {
+				return nil, e
+			}
+		case "multipart/form-data":
 		}
 	}
 
