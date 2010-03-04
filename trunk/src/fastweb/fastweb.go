@@ -5,6 +5,7 @@
 package fastweb
 
 import (
+	"bytes"
 	"container/vector"
 	"fastcgi"
 	"fastweb/template"
@@ -15,6 +16,7 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -40,7 +42,7 @@ type Error interface {
 }
 
 type ErrorStruct struct {
-	typ string
+	typ     string
 	message string
 }
 
@@ -72,7 +74,7 @@ type env struct {
 	laction     string
 	params      []string
 	request     *fastcgi.Request
-	form	    map[string][]string
+	form        map[string][]string
 }
 
 type Controller struct {
@@ -85,7 +87,7 @@ type Controller struct {
 	PageTitle   string
 	Layout      string
 	ContentType string
-	Form	    map[string][]string
+	Form        map[string][]string
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
 	preRenered  bool
@@ -147,7 +149,7 @@ func loadTemplate(fname string) (*template.Template, os.Error) {
 		}
 		ti = &tmplInfo{
 			mtime: dir.Mtime_ns,
-			tmpl: t,
+			tmpl:  t,
 		}
 		tmplCache[fname] = ti
 	}
@@ -183,7 +185,7 @@ func (c *Controller) RenderContent() string {
 	return ""
 }
 
-func (c* Controller) renderTemplate(fname string) {
+func (c *Controller) renderTemplate(fname string) {
 	t, e := loadTemplate(fname)
 	if e == nil {
 		t.Execute(c.ctxt, c.Request.Stdout)
@@ -220,7 +222,7 @@ type ErrorHandler struct {
 	typ string
 }
 
-func NewErrorHandler(e Error, r *fastcgi.Request) *ErrorHandler{
+func NewErrorHandler(e Error, r *fastcgi.Request) *ErrorHandler {
 	eh := &ErrorHandler{
 		typ: e.Type(),
 	}
@@ -262,7 +264,7 @@ func titleCase(s string) string {
 	return s
 }
 
-func parseKeyValueString(m map[string]*vector.StringVector, s string) (os.Error) {
+func parseKeyValueString(m map[string]*vector.StringVector, s string) os.Error {
 	if s == "" {
 		return nil
 	}
@@ -295,6 +297,220 @@ func parseKeyValueString(m map[string]*vector.StringVector, s string) (os.Error)
 	return nil
 }
 
+var boundaryRE, _ = regexp.Compile("boundary=\"?([^\";,]+)\"?")
+
+type multipartReader struct {
+	rd   io.Reader
+	bd   []byte
+	buf  []byte
+	head int
+	tail int
+	eof  bool
+	done bool
+}
+
+func newMultipartReader(rd io.Reader, bd string) *multipartReader {
+	return &multipartReader{
+		rd:   rd,
+		bd:   []byte("\r\n--" + bd),
+		buf:  make([]byte, 4096),
+		head: 0,
+		tail: 0,
+	}
+}
+
+func (md *multipartReader) finished() bool { return md.done }
+
+func (md *multipartReader) read(delim []byte) ([]byte, os.Error) {
+	if md.done {
+		return nil, os.EOF
+	}
+
+	if !md.eof && md.tail < len(md.buf) {
+		n, e := md.rd.Read(md.buf[md.tail:len(md.buf)])
+		if e != nil {
+			if e != os.EOF {
+				return nil, e
+			}
+			md.eof = true
+		}
+		md.tail += n
+	}
+
+	if i := bytes.Index(md.buf[md.head:md.tail], delim); i >= 0 {
+		s := make([]byte, i)
+		copy(s, md.buf[md.head:md.head+i])
+		md.head += i + len(delim)
+		return s, os.EOF
+	}
+
+	if md.eof {
+		md.done = true
+		return md.buf[md.head:md.tail], os.EOF
+	}
+
+	bf := md.tail - md.head
+	keep := len(delim) - 1
+	if keep > bf {
+		keep = bf
+	}
+	stop := md.tail - keep
+	n := stop - md.head
+	s := make([]byte, n)
+	if n > 0 {
+		copy(s, md.buf[md.head:stop])
+	}
+
+	copy(md.buf[0:keep], md.buf[stop:md.tail])
+	md.head = 0
+	md.tail = keep
+
+	return s, nil
+}
+
+func (md *multipartReader) readFirstLine() { md.readUntil(md.bd[2:len(md.bd)], false) }
+
+var crlf2 = []byte{'\r', '\n', '\r', '\n'}
+
+func (md *multipartReader) readUntil(delim []byte, checkEnd bool) (string, os.Error) {
+	var s string
+
+	for true {
+		b, e := md.read(delim)
+		if b != nil {
+			s += string(b)
+		}
+		if e != nil {
+			if e == os.EOF {
+				if checkEnd && md.tail-md.head >= 2 && string(md.buf[md.head:md.head+2]) == "--" {
+					md.done = true
+				}
+				break
+			}
+			return "", os.NewError("failed to parse multipart form")
+		}
+	}
+
+	return s, nil
+}
+
+type hdrInfo struct {
+	val string
+	attribs map[string]string
+}
+
+func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
+	s, _ := md.readUntil(crlf2, false)
+	lines := strings.Split(s[2:len(s)], "\r\n", 0)
+	hdrs := make(map[string]*hdrInfo)
+	for _, line := range lines {
+		var key, attrib string
+		var attribs map[string]string
+		var j int
+		phase := 0
+		line += ";"
+		for i, c := range line {
+			switch phase {
+			case 0:
+				if c == ':' {
+					key = strings.TrimSpace(line[0:i])
+					phase++
+					j = i + 1
+				}
+			case 1:
+				if c == ';' {
+					attribs = make(map[string]string)
+					hdrs[key] = &hdrInfo {
+						val: strings.TrimSpace(line[j:i]),
+						attribs: attribs,
+					}
+					phase++
+					j = i + 1
+				}
+			case 2:
+				if c == '=' {
+					attrib = strings.TrimSpace(line[j:i])
+					phase++
+					j = i + 1
+				}
+			case 3:
+				if c == '"' {
+					phase++
+					j = i + 1
+				} else if c == ';' {
+					attribs[attrib] = strings.TrimSpace(line[j:i])
+					phase = 2
+					j = i + 1
+				}
+			case 4:
+				if c == '\\' {
+					phase++
+				} else if c == '"' {
+					attribs[attrib] = line[j:i]
+					phase += 2
+				}
+			case 5:
+				phase--
+			case 6:
+				if c == ';' {
+					phase = 2
+					j = i + 1
+				}
+			}
+		}
+	}
+	return hdrs, nil
+}
+
+
+func (md *multipartReader) readBody() (string, os.Error) {
+	return md.readUntil(md.bd, true)
+}
+
+var ErrInvalidMultipartForm = os.NewError("invalid multipart/form-data")
+
+func parseMultipartForm(m map[string]*vector.StringVector, r *fastcgi.Request) os.Error {
+	ct := r.Params["CONTENT_TYPE"]
+	a := boundaryRE.ExecuteString(ct)
+	if len(a) < 4 {
+		return os.NewError("can't find boundary in content type")
+	}
+	b := ct[a[2]:a[3]]
+	rd := newMultipartReader(r.Stdin, b)
+	rd.readFirstLine()
+	for !rd.finished() {
+		hdrs, e := rd.readHeaders()
+		if e != nil {
+			return e
+		}
+		cd, ok := hdrs["Content-Disposition"]
+		if !ok {
+			return ErrInvalidMultipartForm
+		}
+		name, ok := cd.attribs["name"]
+		if !ok {
+			return ErrInvalidMultipartForm
+		}
+		filename, ok := cd.attribs["filename"]
+		if ok {
+			filename = filename
+			rd.readBody()
+		} else {
+			vec, ok := m[name]
+			if !ok {
+				vec = new(vector.StringVector)
+				m[name] = vec
+			}
+			s, e := rd.readBody()
+			if e != nil {
+				return e
+			}
+			vec.Push(s)
+		}
+	}
+	return nil
+}
+
 func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 	m := make(map[string]*vector.StringVector)
 
@@ -307,8 +523,8 @@ func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 	}
 
 	if r.Params["REQUEST_METHOD"] == "POST" {
-		switch r.Params["CONTENT_TYPE"] {
-		case "application/x-www-form-urlencoded":
+		switch ct := r.Params["CONTENT_TYPE"]; true {
+		case ct == "application/x-www-form-urlencoded":
 			var b []byte
 			var e os.Error
 			if b, e = ioutil.ReadAll(r.Stdin); e != nil {
@@ -318,7 +534,13 @@ func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 			if e != nil {
 				return nil, e
 			}
-		case "multipart/form-data":
+		case strings.HasPrefix(ct, "multipart/form-data"):
+			e := parseMultipartForm(m, r)
+			if e != nil {
+				return nil, e
+			}
+		default:
+			log.Stderrf("unknown content type '%s'", ct)
 		}
 	}
 
@@ -329,7 +551,7 @@ func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 		form[k] = vec.Data()
 	}
 
-        return form, nil
+	return form, nil
 }
 
 func (a *Application) getEnv(r *fastcgi.Request) *env {
@@ -365,14 +587,14 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	form, _ := parseForm(r)
 
 	return &env{
-		path: path,
-		controller: name,
+		path:        path,
+		controller:  name,
 		lcontroller: lname,
-		action: action,
-		laction: laction,
-		params: params,
-		request: r,
-		form: form,
+		action:      action,
+		laction:     laction,
+		params:      params,
+		request:     r,
+		form:        form,
 	}
 }
 
@@ -459,7 +681,7 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 
 func NewApplication() *Application {
 	return &Application{
-		controllerMap: make(map[string]*controllerInfo),
+		controllerMap:     make(map[string]*controllerInfo),
 		defaultController: "default",
 	}
 }
@@ -505,19 +727,19 @@ func (a *Application) RegisterController(c ControllerInterface) {
 			}
 		}
 		mmap[name] = &methodInfo{
-			name: name,
-			method: m.Func,
-			nparams: nin,
+			name:       name,
+			method:     m.Func,
+			nparams:    nin,
 			paramTypes: ptypes,
 		}
 	}
 
 	a.controllerMap[name] = &controllerInfo{
-		name: name,
-		controller: c,
-		controllerType: t,
+		name:              name,
+		controller:        c,
+		controllerType:    t,
 		controllerPtrType: ptrt.(*reflect.PtrType),
-		methodMap: mmap,
+		methodMap:         mmap,
 	}
 }
 
