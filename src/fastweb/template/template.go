@@ -107,8 +107,8 @@ type FormatterMap map[string]func(io.Writer, interface{}, string)
 // Built-in formatters.
 var builtins = FormatterMap{
 	"html": HTMLFormatter,
-	"str": StringFormatter,
-	"": StringFormatter,
+	"str":  StringFormatter,
+	"":     StringFormatter,
 }
 
 // The parsed state of a template is a vector of xxxElement structs.
@@ -969,7 +969,7 @@ func (t *Template) Parse(s string) os.Error {
 	if !validDelim(t.ldelim) || !validDelim(t.rdelim) {
 		return &Error{1, fmt.Sprintf("bad delimiter strings %q %q", t.ldelim, t.rdelim)}
 	}
-	t.buf = strings.Bytes(s)
+	t.buf = []byte(s)
 	t.p = 0
 	t.linenum = 1
 	t.parse()
@@ -996,8 +996,8 @@ func (t *Template) Execute(data interface{}, wr io.Writer) os.Error {
 // delimiters are very rarely invalid and Parse has the necessary
 // error-handling interface already.
 func (t *Template) SetDelims(left, right string) {
-	t.ldelim = strings.Bytes(left)
-	t.rdelim = strings.Bytes(right)
+	t.ldelim = []byte(left)
+	t.rdelim = []byte(right)
 }
 
 // Parse creates a Template with default parameters (such as {} for
