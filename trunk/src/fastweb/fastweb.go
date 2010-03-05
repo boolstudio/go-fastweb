@@ -5,6 +5,7 @@
 package fastweb
 
 import (
+	"bufio"
 	"bytes"
 	"container/vector"
 	"fastcgi"
@@ -15,10 +16,12 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"rand"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -75,6 +78,12 @@ type env struct {
 	params      []string
 	request     *fastcgi.Request
 	form        map[string][]string
+	upload      map[string][](*Upload)
+}
+
+type Upload struct {
+	File	 *os.File
+	Filename string
 }
 
 type Controller struct {
@@ -88,6 +97,7 @@ type Controller struct {
 	Layout      string
 	ContentType string
 	Form        map[string][]string
+	Upload      map[string][]*Upload
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
 	preRenered  bool
@@ -118,6 +128,7 @@ func (c *Controller) SetEnv(env *env) {
 	c.Params = env.params
 	c.Request = env.request
 	c.Form = env.form
+	c.Upload = env.upload
 }
 
 func (c *Controller) PreFilter() {}
@@ -368,17 +379,19 @@ func (md *multipartReader) read(delim []byte) ([]byte, os.Error) {
 	return s, nil
 }
 
-func (md *multipartReader) readFirstLine() { md.readUntil(md.bd[2:len(md.bd)], false) }
+func (md *multipartReader) readFirstLine() { md.readStringUntil(md.bd[2:len(md.bd)], false) }
 
 var crlf2 = []byte{'\r', '\n', '\r', '\n'}
 
-func (md *multipartReader) readUntil(delim []byte, checkEnd bool) (string, os.Error) {
-	var s string
+type byteConsumer func([]byte) os.Error
 
-	for true {
+func (md *multipartReader) readUntil(delim []byte, checkEnd bool, f byteConsumer) os.Error {
+	for {
 		b, e := md.read(delim)
 		if b != nil {
-			s += string(b)
+			if e := f(b); e != nil {
+				return e
+			}
 		}
 		if e != nil {
 			if e == os.EOF {
@@ -387,11 +400,20 @@ func (md *multipartReader) readUntil(delim []byte, checkEnd bool) (string, os.Er
 				}
 				break
 			}
-			return "", os.NewError("failed to parse multipart form")
+			return e
 		}
 	}
 
-	return s, nil
+	return nil
+}
+
+func (md *multipartReader) readStringUntil(delim []byte, checkEnd bool) (string, os.Error) {
+	var s string
+	e := md.readUntil(delim, checkEnd, func(b []byte) os.Error {
+		s += string(b)
+		return nil
+	})
+	return s, e
 }
 
 type hdrInfo struct {
@@ -400,7 +422,7 @@ type hdrInfo struct {
 }
 
 func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
-	s, _ := md.readUntil(crlf2, false)
+	s, _ := md.readStringUntil(crlf2, false)
 	lines := strings.Split(s[2:len(s)], "\r\n", 0)
 	hdrs := make(map[string]*hdrInfo)
 	for _, line := range lines {
@@ -464,12 +486,38 @@ func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
 
 
 func (md *multipartReader) readBody() (string, os.Error) {
-	return md.readUntil(md.bd, true)
+	return md.readStringUntil(md.bd, true)
 }
 
-var ErrInvalidMultipartForm = os.NewError("invalid multipart/form-data")
+var pads = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-func parseMultipartForm(m map[string]*vector.StringVector, r *fastcgi.Request) os.Error {
+func tempfile() (*os.File, os.Error) {
+	tmpdir := os.Getenv("TMPDIR")
+	if tmpdir == "" {
+		tmpdir = "/tmp"
+	}
+
+	rand.Seed(time.Nanoseconds())
+
+	for {
+		var s string
+		for i := 0; i < 10; i++ {
+			s += string(pads[rand.Int() % len(pads)])
+		}
+		file, e := os.Open(tmpdir + "/fastweb." + s, os.O_WRONLY | os.O_CREATE | os.O_EXCL, 0600)
+		if e == nil {
+			return file, e
+		}
+		pe, ok := e.(*os.PathError)
+		if !ok || pe.Error != os.EEXIST {
+			return nil, e
+		}
+	}
+
+	return nil, nil
+}
+
+func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.Vector, r *fastcgi.Request) os.Error {
 	ct := r.Params["CONTENT_TYPE"]
 	a := boundaryRE.ExecuteString(ct)
 	if len(a) < 4 {
@@ -485,16 +533,41 @@ func parseMultipartForm(m map[string]*vector.StringVector, r *fastcgi.Request) o
 		}
 		cd, ok := hdrs["Content-Disposition"]
 		if !ok {
-			return ErrInvalidMultipartForm
+			return os.NewError("can't find Content-Disposition")
 		}
 		name, ok := cd.attribs["name"]
 		if !ok {
-			return ErrInvalidMultipartForm
+			return os.NewError("can't find attrib 'name' in Content-Disposition")
 		}
 		filename, ok := cd.attribs["filename"]
 		if ok {
-			filename = filename
-			rd.readBody()
+			vec, ok := u[name]
+			if !ok {
+				vec = new(vector.Vector)
+				u[name] = vec
+			}
+
+			file, e := tempfile()
+			if e != nil {
+				return e
+			}
+			wr := bufio.NewWriter(file)
+			fname := file.Name()
+			rd.readUntil(rd.bd, true, func(b []byte) os.Error {
+				if _, e := wr.Write(b); e != nil {
+					return e
+				}
+				return nil
+			})
+			wr.Flush()
+			// to flush (system) buffer, re-open immediately
+			file.Close()
+			file, _ = os.Open(fname, os.O_RDONLY, 0)
+
+			vec.Push(&Upload{
+				File: file,
+				Filename: filename,
+			})
 		} else {
 			vec, ok := m[name]
 			if !ok {
@@ -511,14 +584,15 @@ func parseMultipartForm(m map[string]*vector.StringVector, r *fastcgi.Request) o
 	return nil
 }
 
-func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
+func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, os.Error) {
 	m := make(map[string]*vector.StringVector)
+	u := make(map[string]*vector.Vector)
 
 	s := r.Params["QUERY_STRING"]
 	if s != "" {
 		e := parseKeyValueString(m, s)
 		if e != nil {
-			return nil, e
+			return nil, nil, e
 		}
 	}
 
@@ -528,30 +602,38 @@ func parseForm(r *fastcgi.Request) (map[string][]string, os.Error) {
 			var b []byte
 			var e os.Error
 			if b, e = ioutil.ReadAll(r.Stdin); e != nil {
-				return nil, e
+				return nil, nil, e
 			}
 			e = parseKeyValueString(m, string(b))
 			if e != nil {
-				return nil, e
+				return nil, nil, e
 			}
 		case strings.HasPrefix(ct, "multipart/form-data"):
-			e := parseMultipartForm(m, r)
+			e := parseMultipartForm(m, u, r)
 			if e != nil {
-				return nil, e
+				return nil, nil, e
 			}
 		default:
 			log.Stderrf("unknown content type '%s'", ct)
 		}
 	}
 
-	var form map[string][]string
-	form = make(map[string][]string)
-
+	form := make(map[string][]string)
 	for k, vec := range m {
 		form[k] = vec.Data()
 	}
 
-	return form, nil
+	upload := make(map[string][]*Upload)
+	for k, vec := range u {
+		d := vec.Data()
+		v := make([]*Upload, len(d))
+		for i, u := range d {
+			v[i] = u.(*Upload)
+		}
+		upload[k] = v
+	}
+
+	return form, upload, nil
 }
 
 func (a *Application) getEnv(r *fastcgi.Request) *env {
@@ -584,7 +666,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	name := titleCase(lname)
 	action := titleCase(laction)
 
-	form, _ := parseForm(r)
+	form, upload, _ := parseForm(r)
 
 	return &env{
 		path:        path,
@@ -595,6 +677,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		params:      params,
 		request:     r,
 		form:        form,
+		upload:      upload,
 	}
 }
 
