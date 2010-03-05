@@ -666,7 +666,10 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	name := titleCase(lname)
 	action := titleCase(laction)
 
-	form, upload, _ := parseForm(r)
+	form, upload, e := parseForm(r)
+	if e != nil {
+		log.Stderrf("failed to parse form: %s", e.String())
+	}
 
 	return &env{
 		path:        path,
