@@ -79,11 +79,21 @@ type env struct {
 	request     *fastcgi.Request
 	form        map[string][]string
 	upload      map[string][](*Upload)
+	cookies     map[string]string
 }
 
 type Upload struct {
 	File	 *os.File
 	Filename string
+}
+
+type cookie struct {
+	value string
+	expire *time.Time
+	path string
+	domain string
+	secure bool
+	httpOnly bool
 }
 
 type Controller struct {
@@ -98,6 +108,8 @@ type Controller struct {
 	ContentType string
 	Form        map[string][]string
 	Upload      map[string][]*Upload
+	Cookies	    map[string]string
+	setCookies  map[string]*cookie
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
 	preRenered  bool
@@ -129,6 +141,7 @@ func (c *Controller) SetEnv(env *env) {
 	c.Request = env.request
 	c.Form = env.form
 	c.Upload = env.upload
+	c.Cookies = env.cookies
 }
 
 func (c *Controller) PreFilter() {}
@@ -175,7 +188,31 @@ func (c *Controller) SetContext(ctxt ControllerInterface) {
 
 func (c *Controller) preRender() {
 	if !c.preRenered {
-		io.WriteString(c.Request.Stdout, "Content-type: "+c.ContentType+"\r\n\r\n")
+		io.WriteString(c.Request.Stdout, "Content-type: "+c.ContentType+"\r\n")
+
+		if c.setCookies != nil {
+			for k, ck := range c.setCookies {
+				s := "Set-Cookie: " + k + "=" + http.URLEscape(ck.value)
+				if ck.expire != nil {
+					s += "; expire=" + ck.expire.Format(time.RFC1123)
+				}
+				if ck.path != "" {
+					s += "; path=" + ck.path
+				}
+				if ck.domain != "" {
+					s += "; path=" + ck.domain
+				}
+				if ck.secure {
+					s += "; secure"
+				}
+				if ck.httpOnly {
+					s += "; HttpOnly"
+				}
+				io.WriteString(c.Request.Stdout, s+"\r\n")
+			}
+		}
+
+		io.WriteString(c.Request.Stdout, "\r\n")
 		c.preRenered = true
 	}
 }
@@ -225,6 +262,25 @@ func (c *Controller) Render() {
 		c.RenderContent()
 	} else {
 		t.Execute(c.ctxt, c.Request.Stdout)
+	}
+}
+
+func (c *Controller) SetCookie(key string, value string) {
+	c.SetCookieFull(key, value, nil, "", "", false, false)
+}
+
+func (c *Controller) SetCookieFull(key string, value string, expire *time.Time, path string, domain string, secure bool, httpOnly bool) {
+	if c.setCookies == nil {
+		c.setCookies = make(map[string]*cookie)
+	}
+
+	c.setCookies[key] = &cookie{
+		value: value,
+		expire: expire,
+		path: path,
+		domain: domain,
+		secure: secure,
+		httpOnly: httpOnly,
 	}
 }
 
@@ -417,8 +473,69 @@ func (md *multipartReader) readStringUntil(delim []byte, checkEnd bool) (string,
 }
 
 type hdrInfo struct {
+	key string
 	val string
 	attribs map[string]string
+}
+
+func parseHeader(line string) *hdrInfo {
+	var key, attrib string
+	var hdr *hdrInfo
+	var attribs map[string]string
+	var j int
+	phase := 0
+	line += ";"
+	for i, c := range line {
+		switch phase {
+		case 0:
+			if c == ':' {
+				key = strings.TrimSpace(line[0:i])
+				phase++
+				j = i + 1
+			}
+		case 1:
+			if c == ';' {
+				attribs = make(map[string]string)
+				hdr = &hdrInfo {
+					key: key,
+					val: strings.TrimSpace(line[j:i]),
+					attribs: attribs,
+				}
+				phase++
+				j = i + 1
+			}
+		case 2:
+			if c == '=' {
+				attrib = strings.TrimSpace(line[j:i])
+				phase++
+				j = i + 1
+			}
+		case 3:
+			if c == '"' {
+				phase++
+				j = i + 1
+			} else if c == ';' {
+				attribs[attrib] = strings.TrimSpace(line[j:i])
+				phase = 2
+				j = i + 1
+			}
+		case 4:
+			if c == '\\' {
+				phase++
+			} else if c == '"' {
+				attribs[attrib] = line[j:i]
+				phase += 2
+			}
+		case 5:
+			phase--
+		case 6:
+			if c == ';' {
+				phase = 2
+				j = i + 1
+			}
+		}
+	}
+	return hdr
 }
 
 func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
@@ -426,59 +543,8 @@ func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
 	lines := strings.Split(s[2:len(s)], "\r\n", 0)
 	hdrs := make(map[string]*hdrInfo)
 	for _, line := range lines {
-		var key, attrib string
-		var attribs map[string]string
-		var j int
-		phase := 0
-		line += ";"
-		for i, c := range line {
-			switch phase {
-			case 0:
-				if c == ':' {
-					key = strings.TrimSpace(line[0:i])
-					phase++
-					j = i + 1
-				}
-			case 1:
-				if c == ';' {
-					attribs = make(map[string]string)
-					hdrs[key] = &hdrInfo {
-						val: strings.TrimSpace(line[j:i]),
-						attribs: attribs,
-					}
-					phase++
-					j = i + 1
-				}
-			case 2:
-				if c == '=' {
-					attrib = strings.TrimSpace(line[j:i])
-					phase++
-					j = i + 1
-				}
-			case 3:
-				if c == '"' {
-					phase++
-					j = i + 1
-				} else if c == ';' {
-					attribs[attrib] = strings.TrimSpace(line[j:i])
-					phase = 2
-					j = i + 1
-				}
-			case 4:
-				if c == '\\' {
-					phase++
-				} else if c == '"' {
-					attribs[attrib] = line[j:i]
-					phase += 2
-				}
-			case 5:
-				phase--
-			case 6:
-				if c == ';' {
-					phase = 2
-					j = i + 1
-				}
-			}
+		if hdr := parseHeader(line); hdr != nil {
+			hdrs[hdr.key] = hdr
 		}
 	}
 	return hdrs, nil
@@ -524,10 +590,10 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 		return os.NewError("can't find boundary in content type")
 	}
 	b := ct[a[2]:a[3]]
-	rd := newMultipartReader(r.Stdin, b)
-	rd.readFirstLine()
-	for !rd.finished() {
-		hdrs, e := rd.readHeaders()
+	md := newMultipartReader(r.Stdin, b)
+	md.readFirstLine()
+	for !md.finished() {
+		hdrs, e := md.readHeaders()
 		if e != nil {
 			return e
 		}
@@ -553,7 +619,7 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 			}
 			wr := bufio.NewWriter(file)
 			fname := file.Name()
-			rd.readUntil(rd.bd, true, func(b []byte) os.Error {
+			md.readUntil(md.bd, true, func(b []byte) os.Error {
 				if _, e := wr.Write(b); e != nil {
 					return e
 				}
@@ -574,7 +640,7 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 				vec = new(vector.StringVector)
 				m[name] = vec
 			}
-			s, e := rd.readBody()
+			s, e := md.readBody()
 			if e != nil {
 				return e
 			}
@@ -636,6 +702,39 @@ func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, o
 	return form, upload, nil
 }
 
+func parseCookies(r *fastcgi.Request) (map[string]string, os.Error) {
+	cookies := make(map[string]string)
+
+	if s, ok := r.Params["HTTP_COOKIE"]; ok {
+		var key string
+		phase := 0
+		j := 0
+		s += ";"
+		for i, c := range s {
+			switch phase {
+			case 0:
+				if c == '=' {
+					key = strings.TrimSpace(s[j:i])
+					j = i + 1
+					phase++
+				}
+			case 1:
+				if c == ';' {
+					v, e := http.URLUnescape(s[j:i])
+					if e != nil {
+						return cookies, e
+					}
+					cookies[key] = v
+					phase = 0
+					j = i + 1
+				}
+			}
+		}
+	}
+
+	return cookies, nil
+}
+
 func (a *Application) getEnv(r *fastcgi.Request) *env {
 	var params []string
 	var lname string
@@ -671,6 +770,11 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		log.Stderrf("failed to parse form: %s", e.String())
 	}
 
+	cookies, e := parseCookies(r)
+	if e != nil {
+		log.Stderrf("failed to parse cookies: %s", e.String())
+	}
+
 	return &env{
 		path:        path,
 		controller:  name,
@@ -681,6 +785,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		request:     r,
 		form:        form,
 		upload:      upload,
+		cookies:     cookies,
 	}
 }
 
