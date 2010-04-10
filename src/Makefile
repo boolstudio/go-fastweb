@@ -21,17 +21,14 @@ all: install
 
 DIRS=\
 	fastcgi\
-	fastweb/template\
 	fastweb\
 
 NOTEST=\
 	fastcgi\
-	fastweb/template\
 	fastweb\
 
 NOBENCH=\
 	fastcgi\
-	fastweb/template\
 	fastweb\
 
 TEST=\

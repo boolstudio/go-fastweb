@@ -60,9 +60,10 @@
 	where wr is the destination for output, data is the field
 	value, and formatter is its name at the invocation site.
 */
-package template
+package fastweb
 
 import (
+	"bytes"
 	"container/vector"
 	"fmt"
 	"io"
@@ -74,12 +75,12 @@ import (
 
 // Errors returned during parsing and execution.  Users may extract the information and reformat
 // if they desire.
-type Error struct {
+type TemplateError struct {
 	Line int
 	Msg  string
 }
 
-func (e *Error) String() string { return fmt.Sprintf("line %d: %s", e.Line, e.Msg) }
+func (e *TemplateError) String() string { return fmt.Sprintf("line %d: %s", e.Line, e.Msg) }
 
 // Most of the literals are aces.
 var lbrace = []byte{'{'}
@@ -188,14 +189,14 @@ func New(fmap FormatterMap) *Template {
 
 // Report error and stop executing.  The line number must be provided explicitly.
 func (t *Template) execError(st *state, line int, err string, args ...interface{}) {
-	st.errors <- &Error{line, fmt.Sprintf(err, args)}
+	st.errors <- &TemplateError{line, fmt.Sprintf(err, args)}
 	runtime.Goexit()
 }
 
 // Report error, save in Template to terminate parsing.
 // The line number comes from the template state.
 func (t *Template) parseError(err string, args ...interface{}) {
-	t.error = &Error{t.linenum, fmt.Sprintf(err, args)}
+	t.error = &TemplateError{t.linenum, fmt.Sprintf(err, args)}
 }
 
 // -- Lexical analysis
@@ -964,10 +965,10 @@ func validDelim(d []byte) bool {
 // the error.
 func (t *Template) Parse(s string) os.Error {
 	if t.elems == nil {
-		return &Error{1, "template not allocated with New"}
+		return &TemplateError{1, "template not allocated with New"}
 	}
 	if !validDelim(t.ldelim) || !validDelim(t.rdelim) {
-		return &Error{1, fmt.Sprintf("bad delimiter strings %q %q", t.ldelim, t.rdelim)}
+		return &TemplateError{1, fmt.Sprintf("bad delimiter strings %q %q", t.ldelim, t.rdelim)}
 	}
 	t.buf = []byte(s)
 	t.p = 0
@@ -1018,7 +1019,61 @@ func Parse(s string, fmap FormatterMap) (t *Template, err os.Error) {
 func MustParse(s string, fmap FormatterMap) *Template {
 	t, err := Parse(s, fmap)
 	if err != nil {
-		panic("template parse error: ", err.String())
+		panic("template parse error: " + err.String())
 	}
 	return t
+}
+
+// StringFormatter formats into the default string representation.
+// It is stored under the name "str" and is the default formatter.
+// You can override the default formatter by storing your default
+// under the name "" in your custom formatter map.
+func StringFormatter(w io.Writer, value interface{}, format string) {
+	if b, ok := value.([]byte); ok {
+		w.Write(b)
+		return
+	}
+	fmt.Fprint(w, value)
+}
+
+var (
+	esc_quot = []byte("&#34;") // shorter than "&quot;"
+	esc_apos = []byte("&#39;") // shorter than "&apos;"
+	esc_amp  = []byte("&amp;")
+	esc_lt   = []byte("&lt;")
+	esc_gt   = []byte("&gt;")
+)
+
+// HTMLEscape writes to w the properly escaped HTML equivalent
+// of the plain text data s.
+func HTMLEscape(w io.Writer, s []byte) {
+	var esc []byte
+	last := 0
+	for i, c := range s {
+		switch c {
+		case '"':
+			esc = esc_quot
+		case '\'':
+			esc = esc_apos
+		case '&':
+			esc = esc_amp
+		case '<':
+			esc = esc_lt
+		case '>':
+			esc = esc_gt
+		default:
+			continue
+		}
+		w.Write(s[last:i])
+		w.Write(esc)
+		last = i + 1
+	}
+	w.Write(s[last:])
+}
+
+// HTMLFormatter formats arbitrary values for HTML
+func HTMLFormatter(w io.Writer, value interface{}, format string) {
+	var b bytes.Buffer
+	fmt.Fprint(&b, value)
+	HTMLEscape(w, b.Bytes())
 }
