@@ -8,6 +8,6 @@ clean:
 %.${O}: %.go
 	${GC} -I . $<
 
-%: %.${O} ../src/fastweb/_obj/fastweb.a ../src/fastweb/template/_obj/fastweb/template.a ../src/fastcgi/_obj/fastcgi.a
+%: %.${O} ../src/fastweb/_obj/fastweb.a ../src/fastcgi/_obj/fastcgi.a
 	${LD} -L . -o $@ $<
 

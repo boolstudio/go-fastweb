@@ -8,8 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/vector"
-	"fastcgi"
-	"fastweb/template"
+	"go-fastcgi.googlecode.com/svn/trunk/src/fastcgi"
 	"fmt"
 	"http"
 	"io"
@@ -37,6 +36,8 @@ type ControllerInterface interface {
 	PreFilter()
 	Render()
 	SetContext(ctxt ControllerInterface)
+	StartSession()
+	CloseSession()
 }
 
 type Error interface {
@@ -109,6 +110,7 @@ type Controller struct {
 	Form        map[string][]string
 	Upload      map[string][]*Upload
 	Cookies	    map[string]string
+	Session	    *Session
 	setCookies  map[string]*cookie
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
@@ -147,13 +149,13 @@ func (c *Controller) SetEnv(env *env) {
 func (c *Controller) PreFilter() {}
 
 type tmplInfo struct {
-	tmpl  *template.Template
+	tmpl  *Template
 	mtime uint64
 }
 
 var tmplCache map[string]*tmplInfo = make(map[string]*tmplInfo)
 
-func loadTemplate(fname string) (*template.Template, os.Error) {
+func loadTemplate(fname string) (*Template, os.Error) {
 	dir, e := os.Stat(fname)
 	if e != nil {
 		return nil, e
@@ -167,7 +169,7 @@ func loadTemplate(fname string) (*template.Template, os.Error) {
 		if e != nil {
 			return nil, e
 		}
-		t, e := template.Parse(string(bytes), nil)
+		t, e := Parse(string(bytes), nil)
 		if e != nil {
 			return nil, e
 		}
@@ -282,6 +284,22 @@ func (c *Controller) SetCookieFull(key string, value string, expire *time.Time, 
 		secure: secure,
 		httpOnly: httpOnly,
 	}
+}
+
+func (c *Controller) StartSession() {
+	if c.Session != nil {
+		return
+	}
+
+	c.Session = GetSession(c)
+}
+
+func (c *Controller) CloseSession() {
+	if c.Session == nil {
+		return
+	}
+
+	c.Session.Close()
 }
 
 type ErrorHandler struct {
@@ -562,8 +580,6 @@ func tempfile() (*os.File, os.Error) {
 	if tmpdir == "" {
 		tmpdir = "/tmp"
 	}
-
-	rand.Seed(time.Nanoseconds())
 
 	for {
 		var s string
@@ -849,6 +865,8 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 	c.SetContext(c)
 	c.Render()
 
+	c.CloseSession()
+
 	return nil
 }
 
@@ -879,15 +897,15 @@ func NewApplication() *Application {
 
 func (a *Application) RegisterController(c ControllerInterface) {
 	v := reflect.NewValue(c).(*reflect.PtrValue)
-	ptrt := v.Type()
+	pt := v.Type()
 	t := v.Elem().Type()
 	name := t.Name()
 
 	mmap := make(map[string]*methodInfo)
 
-	n := ptrt.NumMethod()
+	n := pt.NumMethod()
 	for i := 0; i < n; i++ {
-		m := ptrt.Method(i)
+		m := pt.Method(i)
 		name := m.Name
 		switch name {
 		case "SetEnv", "Render", "DefaultAction", "Init", "PreFilter", "SetContext":
@@ -929,11 +947,13 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		name:              name,
 		controller:        c,
 		controllerType:    t,
-		controllerPtrType: ptrt.(*reflect.PtrType),
+		controllerPtrType: pt.(*reflect.PtrType),
 		methodMap:         mmap,
 	}
 }
 
 func (a *Application) Run(addr string) os.Error {
+	rand.Seed(time.Nanoseconds())
 	return fastcgi.RunStandalone(addr, a)
 }
+

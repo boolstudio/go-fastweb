@@ -5,7 +5,7 @@
 package main
 
 import (
-        "fastweb"
+        "go-fastweb.googlecode.com/svn/trunk/src/fastweb"
         "os"
 )
 
