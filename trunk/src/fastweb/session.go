@@ -5,7 +5,7 @@
 package fastweb
 
 import (
-	//"dump"
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -67,13 +67,18 @@ func serializeSlice(wr io.Writer, v sliceValue, tstr string) os.Error {
 	return e
 }
 
+func writeString(wr io.Writer, s string) os.Error {
+	_, e := io.WriteString(wr, "s:\""+escape(s)+"\";")
+	return e
+}
+
 func serialize(wr io.Writer, v reflect.Value) os.Error {
 	var e os.Error
 	switch vv := v.(type) {
 	case *reflect.IntValue:
-		_, e = io.WriteString(wr, "i:"+strconv.Itoa(vv.Get())+":")
+		_, e = io.WriteString(wr, "i:"+strconv.Itoa(vv.Get())+";")
 	case *reflect.StringValue:
-		_, e = io.WriteString(wr, "s:\""+escape(vv.Get())+"\":")
+		writeString(wr, vv.Get())
 	case *reflect.SliceValue:
 		var tstr string
 		et := v.Type().(*reflect.SliceType).Elem()
@@ -83,6 +88,7 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 		case *reflect.StringType:
 			tstr = "s"
 		case *reflect.InterfaceType:
+			tstr = "*"
 		default:
 			return os.NewError("only []int, []string, []interface{} are supported")
 		}
@@ -107,6 +113,7 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 		case *reflect.StringType:
 			estr = "s"
 		case *reflect.InterfaceType:
+			estr = "*"
 		default:
 			return os.NewError("only map[]int, map[]string or map[]interface{} are supported")
 		}
@@ -140,7 +147,7 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 			return e
 		}
 		for i := 0; i < n; i++ {
-			e := serialize(wr, reflect.NewValue(t.Field(i).Name))
+			e := writeString(wr, t.Field(i).Name)
 			if e != nil {
 				return e
 			}
@@ -162,14 +169,239 @@ func Serialize(filename string, perm int, data interface{}) os.Error {
 		return e
 	}
 
-	e = serialize(file, reflect.NewValue(data))
+	wr := bufio.NewWriter(file)
+
+	e = serialize(wr, reflect.NewValue(data))
+	wr.Flush()
 	file.Close()
 
 	return e
 }
 
+func readInt(rd *bufio.Reader) (int, os.Error) {
+	var s string
+	for {
+		c, _, e := rd.ReadRune()
+		if e != nil {
+			return 0, e
+		}
+		if c == ':' {
+			return strconv.Atoi(s)
+		} else {
+			s += string(c)
+		}
+	}
+	return 0, nil
+}
+
+func readString(rd *bufio.Reader) (string, os.Error) {
+	var s string
+	phase := 0
+	for {
+		c, _, e := rd.ReadRune()
+		if e != nil {
+			return s, e
+		}
+		switch phase {
+		case 0:
+			if c == '"' {
+				phase++
+			} else {
+				return "", os.NewError("string without open brace?")
+			}
+		case 1:
+			if c == '\\' {
+				phase++
+			} else if c == '"' {
+				return s, nil
+			} else {
+				s += string(c)
+			}
+		case 2:
+			s += string(c)
+			phase--
+		}
+	}
+	return s, nil
+}
+
+func readMap(rd *bufio.Reader, typ string) (interface{}, os.Error) {
+	var mii map[int]int
+	var mis map[int]string
+	var mi map[int]interface{}
+	var msi map[string]int
+	var mss map[string]string
+	var ms map[string]interface{}
+	var m interface{}
+	b, _, e := rd.ReadRune()
+	if e != nil {
+		return nil, e
+	}
+	if b != '{' {
+		return nil, os.NewError("map without open brace?")
+	}
+	switch typ {
+	case "mii":
+		mii = make(map[int]int)
+		m = mii
+	case "mis":
+		mis = make(map[int]string)
+		m = mis
+	case "mi*":
+		mi = make(map[int]interface{})
+		m = mi
+	case "msi":
+		msi = make(map[string]int)
+		m = msi
+	case "mss":
+		mss = make(map[string]string)
+		m = mss
+	case "ms*":
+		ms = make(map[string]interface{})
+		m = ms
+	}
+	for {
+		b, e := rd.ReadByte()
+		if e != nil {
+			return nil, e
+		}
+		if b == '}' {
+			break
+		}
+		rd.UnreadByte()
+		k, e := deserialize(rd)
+		if e != nil {
+			return nil, e
+		}
+		v, e := deserialize(rd)
+		if e != nil {
+			return nil, e
+		}
+		switch typ {
+		case "mii":
+			mii[k.(int)] = v.(int)
+		case "mis":
+			mis[k.(int)] = v.(string)
+		case "mi*":
+			mi[k.(int)] = v
+		case "msi":
+			msi[k.(string)] = v.(int)
+		case "mss":
+			mss[k.(string)] = v.(string)
+		case "ms*":
+			ms[k.(string)] = v
+		}
+	}
+	return m, nil
+}
+
+func readSlice(rd *bufio.Reader, typ string) (interface{}, os.Error) {
+	var ai []int
+	var as []string
+	var a []interface{}
+	var ret interface{}
+	b, _, e := rd.ReadRune()
+	if e != nil {
+		return nil, e
+	}
+	if b != '{' {
+		return nil, os.NewError("slice without open brace?")
+	}
+	n, e := strconv.Atoi(typ[2:])
+	if e != nil {
+		return nil, e
+	}
+	t := typ[1]
+	switch t {
+	case 'i':
+		ai = make([]int, n)
+		ret = ai
+	case 's':
+		as = make([]string, n)
+		ret = as
+	case '*':
+		a = make([]interface{}, n)
+		ret = a
+	}
+	for i := 0; i < n; i++ {
+		e, _ := deserialize(rd)
+		switch t {
+		case 'i':
+			ai[i] = e.(int)
+		case 's':
+			as[i] = e.(string)
+		case '*':
+			a[i] = e
+		}
+	}
+	b, _, e = rd.ReadRune()
+	if e != nil {
+		return nil, e
+	}
+	if b != '}' {
+		return nil, os.NewError("slice without close brace?")
+	}
+	return ret, nil
+}
+
+func deserialize(rd *bufio.Reader) (interface{}, os.Error) {
+	var typ string
+	var ret interface{}
+	var e os.Error
+	phase := 0
+FOR: for {
+		c, _, e := rd.ReadRune()
+		if e != nil {
+			if e == os.EOF {
+				break
+			}
+			return nil, e
+		}
+		switch phase {
+		case 0:
+			if c == ':' {
+				switch typ[0] {
+				case 'i':
+					ret, e = readInt(rd)
+					phase = 1
+				case 's':
+					ret, e = readString(rd)
+					phase = 1
+				case 'a':
+					ret, e = readSlice(rd, typ)
+					break FOR
+				case 'm':
+					ret, e = readMap(rd, typ)
+					break FOR
+				case 't':
+				default:
+					return nil, os.NewError(fmt.Sprintf("type '%s' not supported", typ))
+				}
+			} else {
+				typ += string(c)
+			}
+		case 1:
+			if c == ';' {
+				break FOR
+			}
+			return nil, os.NewError(fmt.Sprintf("type '%s' doesn't end with semicolon but %c", typ, c))
+		}
+	}
+	return ret, e
+}
+
 func Deserialize(filename string) (interface{}, os.Error) {
-	return nil, nil
+	file, e := os.Open(filename, os.O_RDONLY, 0)
+	if e != nil {
+		return nil, e
+	}
+
+	rd := bufio.NewReader(file)
+
+	d, e := deserialize(rd)
+	file.Close()
+
+	return d, e
 }
 
 type Session struct {
@@ -335,6 +567,5 @@ func (s *Session) GetSlice(key string) ([]interface{}, bool) {
 }
 
 func (s *Session) Close() os.Error {
-	return Serialize(SessionFilePath + "/sess_" + s.sid, 0600, s.data)
+	return Serialize(SessionFilePath+"/sess_"+s.sid, 0600, s.data)
 }
-
