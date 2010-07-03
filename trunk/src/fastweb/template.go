@@ -617,7 +617,7 @@ func (st *state) findVar(s string) reflect.Value {
 		return st.data
 	}
 	data := st.data
-	for _, elem := range strings.Split(s, ".", 0) {
+	for _, elem := range strings.Split(s, ".", -1) {
 		origData := data // for method lookup need value before indirection.
 		// Look up field; data must be a struct or map.
 		data = reflect.Indirect(data)

@@ -150,7 +150,7 @@ func (c *Controller) PreFilter() {}
 
 type tmplInfo struct {
 	tmpl  *Template
-	mtime uint64
+	mtime int64
 }
 
 var tmplCache map[string]*tmplInfo = make(map[string]*tmplInfo)
@@ -340,7 +340,7 @@ func (eh *ErrorHandler) RenderContent() string {
 
 func titleCase(s string) string {
 	if len(s) > 0 {
-		parts := strings.Split(s, "_", 0)
+		parts := strings.Split(s, "_", -1)
 		for i, p := range parts {
 			parts[i] = strings.ToUpper(string(p[0])) + p[1:len(p)]
 		}
@@ -355,7 +355,7 @@ func parseKeyValueString(m map[string]*vector.StringVector, s string) os.Error {
 	}
 
 	// copied from pkg/http/request.go
-	for _, kv := range strings.Split(s, "&", 0) {
+	for _, kv := range strings.Split(s, "&", -1) {
 		if kv == "" {
 			continue
 		}
@@ -558,7 +558,7 @@ func parseHeader(line string) *hdrInfo {
 
 func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
 	s, _ := md.readStringUntil(crlf2, false)
-	lines := strings.Split(s[2:len(s)], "\r\n", 0)
+	lines := strings.Split(s[2:len(s)], "\r\n", -1)
 	hdrs := make(map[string]*hdrInfo)
 	for _, line := range lines {
 		if hdr := parseHeader(line); hdr != nil {
@@ -763,7 +763,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		r.Params["QUERY_STRING"] = p[1]
 	}
 
-	pparts := strings.Split(path, "/", 0)
+	pparts := strings.Split(path, "/", -1)
 	n := len(pparts)
 	if n > 1 {
 		lname = pparts[1]
