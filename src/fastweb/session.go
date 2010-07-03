@@ -58,7 +58,7 @@ func serializeSlice(wr io.Writer, v sliceValue, tstr string) os.Error {
 	}
 	n := v.Len()
 	for i := 0; i < n; i++ {
-		e := serialize(wr, v.Elem(i))
+		e := _serialize(wr, v.Elem(i))
 		if e != nil {
 			return e
 		}
@@ -72,11 +72,11 @@ func writeString(wr io.Writer, s string) os.Error {
 	return e
 }
 
-func serialize(wr io.Writer, v reflect.Value) os.Error {
+func _serialize(wr io.Writer, v reflect.Value) os.Error {
 	var e os.Error
 	switch vv := v.(type) {
 	case *reflect.IntValue:
-		_, e = io.WriteString(wr, "i:"+strconv.Itoa(vv.Get())+";")
+		_, e = io.WriteString(wr, "i:"+strconv.Itoa(int(vv.Get()))+";")
 	case *reflect.StringValue:
 		writeString(wr, vv.Get())
 	case *reflect.SliceValue:
@@ -123,18 +123,18 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 		}
 		keys := vv.Keys()
 		for _, k := range keys {
-			e := serialize(wr, k)
+			e := _serialize(wr, k)
 			if e != nil {
 				return e
 			}
-			e = serialize(wr, vv.Elem(k))
+			e = _serialize(wr, vv.Elem(k))
 			if e != nil {
 				return e
 			}
 		}
 		_, e = io.WriteString(wr, "}")
 	case *reflect.InterfaceValue:
-		e = serialize(wr, vv.Elem())
+		e = _serialize(wr, vv.Elem())
 	case *reflect.PtrValue:
 		sv, ok := vv.Elem().(*reflect.StructValue)
 		if !ok {
@@ -151,7 +151,7 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 			if e != nil {
 				return e
 			}
-			e = serialize(wr, sv.Field(i))
+			e = _serialize(wr, sv.Field(i))
 			if e != nil {
 				return e
 			}
@@ -163,7 +163,7 @@ func serialize(wr io.Writer, v reflect.Value) os.Error {
 	return e
 }
 
-func Serialize(filename string, perm int, data interface{}) os.Error {
+func serialize(filename string, perm int, data interface{}) os.Error {
 	file, e := os.Open(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if e != nil {
 		return e
@@ -171,7 +171,7 @@ func Serialize(filename string, perm int, data interface{}) os.Error {
 
 	wr := bufio.NewWriter(file)
 
-	e = serialize(wr, reflect.NewValue(data))
+	e = _serialize(wr, reflect.NewValue(data))
 	wr.Flush()
 	file.Close()
 
@@ -269,11 +269,11 @@ func readMap(rd *bufio.Reader, typ string) (interface{}, os.Error) {
 			break
 		}
 		rd.UnreadByte()
-		k, e := deserialize(rd)
+		k, e := _deserialize(rd)
 		if e != nil {
 			return nil, e
 		}
-		v, e := deserialize(rd)
+		v, e := _deserialize(rd)
 		if e != nil {
 			return nil, e
 		}
@@ -324,7 +324,7 @@ func readSlice(rd *bufio.Reader, typ string) (interface{}, os.Error) {
 		ret = a
 	}
 	for i := 0; i < n; i++ {
-		e, _ := deserialize(rd)
+		e, _ := _deserialize(rd)
 		switch t {
 		case 'i':
 			ai[i] = e.(int)
@@ -344,7 +344,7 @@ func readSlice(rd *bufio.Reader, typ string) (interface{}, os.Error) {
 	return ret, nil
 }
 
-func deserialize(rd *bufio.Reader) (interface{}, os.Error) {
+func _deserialize(rd *bufio.Reader) (interface{}, os.Error) {
 	var typ string
 	var ret interface{}
 	var e os.Error
@@ -390,7 +390,7 @@ FOR: for {
 	return ret, e
 }
 
-func Deserialize(filename string) (interface{}, os.Error) {
+func deserialize(filename string) (interface{}, os.Error) {
 	file, e := os.Open(filename, os.O_RDONLY, 0)
 	if e != nil {
 		return nil, e
@@ -398,7 +398,7 @@ func Deserialize(filename string) (interface{}, os.Error) {
 
 	rd := bufio.NewReader(file)
 
-	d, e := deserialize(rd)
+	d, e := _deserialize(rd)
 	file.Close()
 
 	return d, e
@@ -412,30 +412,32 @@ type Session struct {
 var sessions = make(map[string]*Session)
 
 func GetSession(c *Controller) *Session {
-	sid, ok := c.Cookies["fastweb_sessid"]
-	if ok {
-		var invalid bool
+	var sid string
+	LOAD: for {
+		var ok bool
+		sid, ok = c.Cookies["fastweb_sessid"]
+		if !ok || len(sid) != 32 {
+			break
+		}
 		for _, c := range sid {
 			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
-				invalid = true
-				break
+				break LOAD
 			}
 		}
-		if !invalid {
-			s, _ := sessions[sid]
-			if s != nil {
-				return s
-			}
+		s, _ := sessions[sid]
+		if s != nil {
+			return s
+		}
 
-			d, e := Deserialize(SessionFilePath + "/sess_" + sid)
-			if e == nil && d != nil {
-				s := &Session{
-					sid:  sid,
-					data: d.(map[string]interface{}),
-				}
-				return s
+		d, e := deserialize(SessionFilePath + "/sess_" + sid)
+		if e == nil && d != nil {
+			s := &Session{
+				sid:  sid,
+				data: d.(map[string]interface{}),
 			}
+			return s
 		}
+		break
 	}
 
 	var uuid [16]byte
@@ -567,5 +569,5 @@ func (s *Session) GetSlice(key string) ([]interface{}, bool) {
 }
 
 func (s *Session) Close() os.Error {
-	return Serialize(SessionFilePath+"/sess_"+s.sid, 0600, s.data)
+	return serialize(SessionFilePath+"/sess_"+s.sid, 0600, s.data)
 }
