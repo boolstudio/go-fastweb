@@ -810,6 +810,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	if env.controller == "" {
 		env.controller = a.defaultController
+		env.lcontroller = titleCase(env.controller)
 	}
 
 	cinfo, _ := a.controllerMap[env.controller]
@@ -823,6 +824,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	if env.action == "" {
 		env.action = c.DefaultAction()
+		env.laction = titleCase(env.action)
 	}
 
 	minfo, _ := cinfo.methodMap[env.action]
