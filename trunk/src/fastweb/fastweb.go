@@ -891,7 +891,7 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 func NewApplication() *Application {
 	return &Application{
 		controllerMap:     make(map[string]*controllerInfo),
-		defaultController: "default",
+		defaultController: "Default",
 	}
 }
 
