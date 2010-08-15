@@ -349,6 +349,24 @@ func titleCase(s string) string {
 	return s
 }
 
+func deTitleCase(s string) string {
+	if len(s) > 0 {
+		var o string
+		for i, c := range s {
+			if c >= 'A' && c <= 'Z' {
+				if i > 0 {
+					o += "_";
+				}
+				o += strings.ToLower(string(c));
+			} else {
+				o += string(c)
+			}
+		}
+		return o
+	}
+	return s
+}
+
 func parseKeyValueString(m map[string]*vector.StringVector, s string) os.Error {
 	if s == "" {
 		return nil
@@ -810,7 +828,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	if env.controller == "" {
 		env.controller = a.defaultController
-		env.lcontroller = titleCase(env.controller)
+		env.lcontroller = deTitleCase(env.controller)
 	}
 
 	cinfo, _ := a.controllerMap[env.controller]
@@ -824,7 +842,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	if env.action == "" {
 		env.action = c.DefaultAction()
-		env.laction = titleCase(env.action)
+		env.laction = deTitleCase(env.action)
 	}
 
 	minfo, _ := cinfo.methodMap[env.action]
@@ -893,7 +911,7 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 func NewApplication() *Application {
 	return &Application{
 		controllerMap:     make(map[string]*controllerInfo),
-		defaultController: "Default",
+		defaultController: "default",
 	}
 }
 
