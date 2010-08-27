@@ -163,7 +163,7 @@ func _serialize(wr io.Writer, v reflect.Value) os.Error {
 	return e
 }
 
-func serialize(filename string, perm int, data interface{}) os.Error {
+func serialize(filename string, perm uint32, data interface{}) os.Error {
 	file, e := os.Open(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if e != nil {
 		return e
