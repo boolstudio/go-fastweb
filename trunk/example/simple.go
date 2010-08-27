@@ -18,6 +18,14 @@ type Products struct {
 	image string
 }
 
+type TestStruct struct {
+	name string
+	brand string
+	features []string
+	specifications []string
+	image string
+}
+
 func (p *Products) View(id string) os.Error {
 	if id == "ah64" {
 		p.name = "RC Apache AH64 4-Channel Electric Helicoper"
@@ -35,6 +43,16 @@ func (p *Products) View(id string) os.Error {
 		}
 		p.image = "/img/ah64.jpg"
 	}
+	/*p.StartSession()
+	s := p.Session
+	m := make(map[string]interface{})
+	m["name"] = p.name
+	m["brand"] = p.brand
+	m["features"] = p.features
+	m["specifications"] = p.specifications
+	m["image"] = p.image
+	s.Set("test", "string")
+	s.Set("test2", m)*/
 	return nil
 }
 

@@ -257,6 +257,11 @@ func (c *Controller) RenderControllerElement(name string) string {
 func (c *Controller) Render() {
 	c.preRender()
 
+	if len(c.Layout) == 0 {
+		c.RenderContent()
+		return
+	}
+
 	fname := "views/layouts/" + c.Layout + ".tpl"
 	t, e := loadTemplate(fname)
 	if e != nil {
