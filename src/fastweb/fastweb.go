@@ -619,7 +619,7 @@ func tempfile() (*os.File, os.Error) {
 
 func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.Vector, r *fastcgi.Request) os.Error {
 	ct := r.Params["CONTENT_TYPE"]
-	a := boundaryRE.ExecuteString(ct)
+	a := boundaryRE.FindStringSubmatchIndex(ct)
 	if len(a) < 4 {
 		return os.NewError("can't find boundary in content type")
 	}
