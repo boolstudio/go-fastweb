@@ -78,6 +78,7 @@ type env struct {
 	laction     string
 	params      []string
 	request     *fastcgi.Request
+	body        string
 	form        map[string][]string
 	upload      map[string][](*Upload)
 	cookies     map[string]string
@@ -107,6 +108,7 @@ type Controller struct {
 	PageTitle   string
 	Layout      string
 	ContentType string
+	Body        string
 	Form        map[string][]string
 	Upload      map[string][]*Upload
 	Cookies	    map[string]string
@@ -141,6 +143,7 @@ func (c *Controller) SetEnv(env *env) {
 	c.Path = env.path
 	c.Params = env.params
 	c.Request = env.request
+	c.Body = env.body
 	c.Form = env.form
 	c.Upload = env.upload
 	c.Cookies = env.cookies
@@ -689,15 +692,16 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 	return nil
 }
 
-func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, os.Error) {
+func parseForm(r *fastcgi.Request) (string, map[string][]string, map[string][]*Upload, os.Error) {
 	m := make(map[string]*vector.StringVector)
 	u := make(map[string]*vector.Vector)
+	var body string
 
 	s := r.Params["QUERY_STRING"]
 	if s != "" {
 		e := parseKeyValueString(m, s)
 		if e != nil {
-			return nil, nil, e
+			return body, nil, nil, e
 		}
 	}
 
@@ -707,16 +711,17 @@ func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, o
 			var b []byte
 			var e os.Error
 			if b, e = ioutil.ReadAll(r.Stdin); e != nil {
-				return nil, nil, e
+				return body, nil, nil, e
 			}
-			e = parseKeyValueString(m, string(b))
+			body = string(b)
+			e = parseKeyValueString(m, body)
 			if e != nil {
-				return nil, nil, e
+				return body, nil, nil, e
 			}
 		case strings.HasPrefix(ct, "multipart/form-data"):
 			e := parseMultipartForm(m, u, r)
 			if e != nil {
-				return nil, nil, e
+				return body, nil, nil, e
 			}
 		default:
 			log.Stderrf("unknown content type '%s'", ct)
@@ -738,7 +743,7 @@ func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, o
 		upload[k] = v
 	}
 
-	return form, upload, nil
+	return body, form, upload, nil
 }
 
 func parseCookies(r *fastcgi.Request) (map[string]string, os.Error) {
@@ -804,7 +809,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	name := titleCase(lname)
 	action := titleCase(laction)
 
-	form, upload, e := parseForm(r)
+	body, form, upload, e := parseForm(r)
 	if e != nil {
 		log.Stderrf("failed to parse form: %s", e.String())
 	}
@@ -822,6 +827,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		laction:     laction,
 		params:      params,
 		request:     r,
+		body:	     body,
 		form:        form,
 		upload:      upload,
 		cookies:     cookies,
