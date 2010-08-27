@@ -698,7 +698,7 @@ func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, o
 
 	if r.Params["REQUEST_METHOD"] == "POST" {
 		switch ct := r.Params["CONTENT_TYPE"]; true {
-		case ct == "application/x-www-form-urlencoded":
+		case strings.HasPrefix(ct, "application/x-www-form-urlencoded") && (len(ct) == 33 || ct[33] == ';'):
 			var b []byte
 			var e os.Error
 			if b, e = ioutil.ReadAll(r.Stdin); e != nil {
