@@ -720,12 +720,12 @@ func parseForm(r *fastcgi.Request) (map[string][]string, map[string][]*Upload, o
 
 	form := make(map[string][]string)
 	for k, vec := range m {
-		form[k] = vec.Data()
+		form[k] = vec.Copy()
 	}
 
 	upload := make(map[string][]*Upload)
 	for k, vec := range u {
-		d := vec.Data()
+		d := vec.Copy()
 		v := make([]*Upload, len(d))
 		for i, u := range d {
 			v[i] = u.(*Upload)
