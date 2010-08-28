@@ -6,11 +6,6 @@ all: package
 package: _obj/$(TARG).a
 testpackage: _test/$(TARG).a
 
-# ugly hack to deal with whitespaces in $GOROOT
-nullstring :=
-space := $(nullstring) # a space at the end
-QUOTED_GOROOT:=$(subst $(space),\ ,$(GOROOT))
-
 include $(QUOTED_GOROOT)/src/Make.common
 
 # GNU Make 3.80 has a bug in lastword
@@ -24,33 +19,34 @@ else
 dir=$(patsubst %/$(elem),%,$(TARG))
 endif
 
-pkgdir=$(QUOTED_GOROOT)/pkg/$(GOOS)_$(GOARCH)/$(PKG_PREFIX)
+pkgdir=$(QUOTED_GOROOT)/pkg/$(GOOS)_$(GOARCH)
 
 INSTALLFILES+=$(pkgdir)/$(TARG).a
 
 # The rest of the cgo rules are below, but these variable updates
 # must be done here so they apply to the main rules.
 ifdef CGOFILES
+CGOTARG=cgo_$(subst /,_,$(TARG))
 GOFILES+=$(patsubst %.go,%.cgo1.go,$(CGOFILES))
 GOFILES+=_cgo_gotypes.go
 OFILES+=_cgo_defun.$O
 GCC_OFILES=$(patsubst %.go,%.cgo2.o,$(CGOFILES))
-INSTALLFILES+=$(pkgdir)/$(TARG).so
+INSTALLFILES+=$(pkgdir)/$(CGOTARG).so
 endif
 
 PREREQ+=$(patsubst %,%.make,$(DEPS))
 
 coverage:
-	$(QUOTED_GOBIN)/gotest
-	$(QUOTED_GOBIN)/6cov -g $(shell pwd) $O.out | grep -v '_test\.go:'
+	gotest
+	6cov -g $(shell pwd) $O.out | grep -v '_test\.go:'
 
-CLEANFILES+=*.cgo1.go *.cgo2.c _cgo_defun.c _cgo_gotypes.go *.so _obj _test _testmain.go
+CLEANFILES+=*.cgo1.go *.cgo2.c _cgo_defun.c _cgo_gotypes.go _cgo_export.* *.so _obj _test _testmain.go
 
 test:
-	$(QUOTED_GOBIN)/gotest
+	gotest
 
 bench:
-	$(QUOTED_GOBIN)/gotest -benchmarks=. -match="Do not run tests"
+	gotest -benchmarks=. -match="Do not run tests"
 
 nuke: clean
 	rm -f $(pkgdir)/$(TARG).a
@@ -65,20 +61,20 @@ $(pkgdir)/$(TARG).a: _obj/$(TARG).a
 	cp _obj/$(TARG).a "$@"
 
 _go_.$O: $(GOFILES) $(PREREQ)
-	$(QUOTED_GOBIN)/$(GC) -o $@ $(GOFILES)
+	$(GC) -o $@ $(GOFILES)
 
 _gotest_.$O: $(GOFILES) $(GOTESTFILES) $(PREREQ)
-	$(QUOTED_GOBIN)/$(GC) -o $@ $(GOFILES) $(GOTESTFILES)
+	$(GC) -o $@ $(GOFILES) $(GOTESTFILES)
 
 _obj/$(TARG).a: _go_.$O $(OFILES)
 	@mkdir -p _obj/$(dir)
 	rm -f _obj/$(TARG).a
-	$(QUOTED_GOBIN)/gopack grc $@ _go_.$O $(OFILES)
+	gopack grc $@ _go_.$O $(OFILES)
 
 _test/$(TARG).a: _gotest_.$O $(OFILES)
 	@mkdir -p _test/$(dir)
 	rm -f _test/$(TARG).a
-	$(QUOTED_GOBIN)/gopack grc $@ _gotest_.$O $(OFILES)
+	gopack grc $@ _gotest_.$O $(OFILES)
 
 importpath:
 	@echo $(TARG)
@@ -92,9 +88,10 @@ dir:
 #
 # to the main Makefile.  This signals that cgo should process x.go
 # and y.go when building the package.
-# There are two optional variables to set, CGO_CFLAGS and CGO_LDFLAGS,
-# which specify compiler and linker flags to use when compiling
-# (using gcc) the C support for x.go and y.go.
+# There are three optional variables to set, CGO_CFLAGS, CGO_LDFLAGS,
+# and CGO_DEPS, which specify compiler flags, linker flags, and linker
+# dependencies to use when compiling (using gcc) the C support for
+# x.go and y.go.
 
 # Cgo translates each x.go file listed in $(CGOFILES) into a basic
 # translation of x.go, called x.cgo1.go. Additionally, three other
@@ -105,8 +102,8 @@ dir:
 #	x.cgo2.c	- C implementations compiled with gcc to create a dynamic library
 #
 
-_cgo_defun.c _cgo_gotypes.go: $(CGOFILES)
-	CGOPKGPATH=$(dir) $(QUOTED_GOBIN)/cgo $(CGO_CFLAGS) $(CGOFILES)
+_cgo_defun.c _cgo_gotypes.go _cgo_export.c _cgo_export.h: $(CGOFILES)
+	CGOPKGPATH=$(dir) cgo -- $(CGO_CFLAGS) $(CGOFILES)
 
 # Ugly but necessary
 %.cgo1.go: _cgo_defun.c _cgo_gotypes.go
@@ -116,7 +113,10 @@ _cgo_defun.c _cgo_gotypes.go: $(CGOFILES)
 	@true
 
 %.cgo2.o: %.cgo2.c
-	gcc $(_CGO_CFLAGS_$(GOARCH)) -fPIC -O2 -o $@ -c $(CGO_CFLAGS) $*.cgo2.c
+	$(HOST_CC) $(_CGO_CFLAGS_$(GOARCH)) -fPIC -O2 -o $@ -c $(CGO_CFLAGS) $*.cgo2.c
+
+_cgo_export.o: _cgo_export.c _cgo_export.h
+	$(HOST_CC) $(_CGO_CFLAGS_$(GOARCH)) -fPIC -O2 -o $@ -c $(CGO_CFLAGS) _cgo_export.c
 
 # The rules above added x.cgo1.go and _cgo_gotypes.go to $(GOFILES),
 # added _cgo_defun.$O to $OFILES, and added the installed copy of
@@ -132,17 +132,16 @@ _CGO_LDFLAGS_freebsd=-shared -lpthread -lm
 _CGO_LDFLAGS_linux=-shared -lpthread -lm
 _CGO_LDFLAGS_darwin=-dynamiclib -Wl,-undefined,dynamic_lookup
 
-
 # Compile x.cgo4.c with gcc to make package_x.so.
 
 # Compile _cgo_defun.c with 6c; needs access to the runtime headers.
 _cgo_defun.$O: _cgo_defun.c
-	$(QUOTED_GOBIN)/$(CC) $(CFLAGS) $(RUNTIME_CFLAGS) _cgo_defun.c
+	$(CC) $(CFLAGS) $(RUNTIME_CFLAGS) _cgo_defun.c
 
-_cgo_.so: $(GCC_OFILES)
-	gcc $(_CGO_CFLAGS_$(GOARCH)) -o $@ $(GCC_OFILES) $(CGO_LDFLAGS)  $(_CGO_LDFLAGS_$(GOOS))
+_cgo_.so: $(GCC_OFILES) $(CGO_DEPS)
+	$(HOST_CC) $(_CGO_CFLAGS_$(GOARCH)) -o $@ $(GCC_OFILES) $(CGO_LDFLAGS)  $(_CGO_LDFLAGS_$(GOOS))
 
-$(pkgdir)/$(TARG).so: _cgo_.so
+$(pkgdir)/$(CGOTARG).so: _cgo_.so
 	@test -d $(QUOTED_GOROOT)/pkg && mkdir -p $(pkgdir)/$(dir)
 	cp _cgo_.so "$@"
 
@@ -150,10 +149,10 @@ $(pkgdir)/$(TARG).so: _cgo_.so
 # These come last so that the rules above can override them
 # for more specific file names.
 %.$O: %.c
-	$(QUOTED_GOBIN)/$(CC) $(CFLAGS) $*.c
+	$(CC) $(CFLAGS) $*.c
 
 %.$O: %.s
-	$(QUOTED_GOBIN)/$(AS) $*.s
+	$(AS) $*.s
 
 %.$O: $(HFILES)
 
