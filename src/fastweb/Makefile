@@ -1,4 +1,4 @@
-include ../Make.$(GOARCH)
+include ../Make.inc
 
 PKG_PREFIX=go-fastweb.googlecode.com/svn/trunk/src
 
