@@ -83,8 +83,8 @@ type TemplateError struct {
 func (e *TemplateError) String() string { return fmt.Sprintf("line %d: %s", e.Line, e.Msg) }
 
 // Most of the literals are aces.
-var lbrace = []byte{'{'}
-var rbrace = []byte{'}'}
+var lbrace = []byte{'<', '%'}
+var rbrace = []byte{'%', '>'}
 var space = []byte{' '}
 var tab = []byte{'\t'}
 
