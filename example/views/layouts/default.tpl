@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" dir="ltr"> 
 <head> 
 <meta http-equiv="content-type" content="text/html; charset=UTF-8"> 
-<title>{PageTitle}</title> 
+<title><%PageTitle}%></title> 
 <link rel="stylesheet" type="text/css" href="/css/default.css"> 
 </head> 
 <body> 
@@ -17,7 +17,7 @@
   </div> 
   <div class="clear"></div> 
   <div id="content"> 
-  {RenderContent}
+  <%RenderContent%>
   </div> 
   <div id="footer"> 
     <p></p> 
