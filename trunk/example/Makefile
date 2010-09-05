@@ -1,4 +1,4 @@
-include ../src/Make.$(GOARCH)
+include ../src/Make.inc
 
 all: simple
 
