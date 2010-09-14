@@ -350,7 +350,12 @@ func titleCase(s string) string {
 	if len(s) > 0 {
 		parts := strings.Split(s, "_", -1)
 		for i, p := range parts {
-			parts[i] = strings.ToUpper(string(p[0])) + p[1:len(p)]
+			l := len(p)
+			if l > 0 {
+				parts[i] = strings.ToUpper(string(p[0])) + p[1:len(p)]
+			} else {
+				parts[i] = ""
+			}
 		}
 		return strings.Join(parts, "")
 	}
