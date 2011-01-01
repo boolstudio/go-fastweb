@@ -243,7 +243,7 @@ func (c *Controller) renderTemplate(fname string) {
 	if e == nil {
 		t.Execute(c.ctxt, c.Request.Stdout)
 	} else {
-		log.Stderrf("failed to load template %s: %s", fname, e)
+		log.Printf("failed to load template %s: %s", fname, e)
 	}
 }
 
@@ -268,7 +268,7 @@ func (c *Controller) Render() {
 	fname := "views/layouts/" + c.Layout + ".tpl"
 	t, e := loadTemplate(fname)
 	if e != nil {
-		log.Stderrf("failed to load layout template %s: %s", fname, e)
+		log.Printf("failed to load layout template %s: %s", fname, e)
 		c.RenderContent()
 	} else {
 		t.Execute(c.ctxt, c.Request.Stdout)
@@ -729,7 +729,7 @@ func parseForm(r *fastcgi.Request) (string, map[string][]string, map[string][]*U
 				return body, nil, nil, e
 			}
 		default:
-			log.Stderrf("unknown content type '%s'", ct)
+			log.Printf("unknown content type '%s'", ct)
 		}
 	}
 
@@ -816,12 +816,12 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 
 	body, form, upload, e := parseForm(r)
 	if e != nil {
-		log.Stderrf("failed to parse form: %s", e.String())
+		log.Printf("failed to parse form: %s", e.String())
 	}
 
 	cookies, e := parseCookies(r)
 	if e != nil {
-		log.Stderrf("failed to parse cookies: %s", e.String())
+		log.Printf("failed to parse cookies: %s", e.String())
 	}
 
 	return &env{
@@ -916,7 +916,7 @@ func (a *Application) Handle(r *fastcgi.Request) bool {
 		} else {
 			ee = NewError("Generic", e.String())
 		}
-		log.Stderrf("%s", e.String())
+		log.Printf("%s", e.String())
 		eh := NewErrorHandler(ee, r)
 		eh.Render()
 	}
