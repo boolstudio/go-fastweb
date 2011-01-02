@@ -130,7 +130,7 @@ func (e *ErrorStruct) Type() string { return e.typ }
 func (c *Controller) Init() {
 	c.PageTitle = ""
 	c.Layout = "default"
-	c.ContentType = "text/html"
+	c.ContentType = "text/html; charset=utf-8"
 }
 
 func (c *Controller) DefaultAction() string { return "Index" }
@@ -193,7 +193,7 @@ func (c *Controller) SetContext(ctxt ControllerInterface) {
 
 func (c *Controller) preRender() {
 	if !c.preRenered {
-		io.WriteString(c.Request.Stdout, "Content-type: "+c.ContentType+"\r\n")
+		io.WriteString(c.Request.Stdout, "Content-Type: "+c.ContentType+"\r\n")
 
 		if c.setCookies != nil {
 			for k, ck := range c.setCookies {
