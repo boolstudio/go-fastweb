@@ -108,6 +108,7 @@ type FormatterMap map[string]func(io.Writer, interface{}, string)
 // Built-in formatters.
 var builtins = FormatterMap{
 	"html": HTMLFormatter,
+	"json": JSONFormatter,
 	"str":  StringFormatter,
 	"":     StringFormatter,
 }
@@ -1073,6 +1074,51 @@ func HTMLEscape(w io.Writer, s []byte) {
 
 // HTMLFormatter formats arbitrary values for HTML
 func HTMLFormatter(w io.Writer, value interface{}, format string) {
+	var b bytes.Buffer
+	fmt.Fprint(&b, value)
+	HTMLEscape(w, b.Bytes())
+}
+
+var (
+	jesc_quot = []byte("\\\"") // shorter than "&quot;"
+	jesc_apos = []byte("\\'") // shorter than "&apos;"
+	jesc_bs = []byte("\\\\")
+	jesc_tab = []byte("\\t")
+	jesc_cr = []byte("\\r")
+	jesc_lf = []byte("\\n")
+)
+
+// JSONEscape writes to w the properly escaped JSON equivalent
+// of the plain text data s.
+func JSONEscape(w io.Writer, s []byte) {
+	var esc []byte
+	last := 0
+	for i, c := range s {
+		switch c {
+		case '"':
+			esc = jesc_quot
+		case '\'':
+			esc = jesc_apos
+		case '\\':
+			esc = jesc_bs
+		case '\t':
+			esc = jesc_tab
+		case '\r':
+			esc = jesc_cr
+		case '\n':
+			esc = jesc_lf
+		default:
+			continue
+		}
+		w.Write(s[last:i])
+		w.Write(esc)
+		last = i + 1
+	}
+	w.Write(s[last:])
+}
+
+// JSONFormatter formats arbitrary values for HTML
+func JSONFormatter(w io.Writer, value interface{}, format string) {
 	var b bytes.Buffer
 	fmt.Fprint(&b, value)
 	HTMLEscape(w, b.Bytes())
