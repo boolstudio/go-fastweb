@@ -1121,5 +1121,5 @@ func JSONEscape(w io.Writer, s []byte) {
 func JSONFormatter(w io.Writer, value interface{}, format string) {
 	var b bytes.Buffer
 	fmt.Fprint(&b, value)
-	HTMLEscape(w, b.Bytes())
+	JSONEscape(w, b.Bytes())
 }
