@@ -1,2 +1,0 @@
-fastcgi.install:
-fastweb.install: fastcgi.install

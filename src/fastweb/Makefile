@@ -1,8 +1,7 @@
-include ../Make.inc
+include $(GOROOT)/src/Make.inc
 
-PKG_PREFIX=go-fastweb.googlecode.com/svn/trunk/src
+TARG=go-fastweb.googlecode.com/svn/trunk/src/fastweb
 
-TARG=fastweb
 GOFILES=\
 	fastweb.go\
 	session.go\
@@ -10,4 +9,4 @@ GOFILES=\
 	execute.go\
 	format.go
 
-include ../Make.pkg
+include $(GOROOT)/src/Make.pkg
