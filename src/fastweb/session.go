@@ -48,7 +48,7 @@ func escape(s string) string {
 
 type sliceValue interface {
 	Len() int
-	Elem(i int) reflect.Value
+	Index(i int) reflect.Value
 }
 
 func serializeSlice(wr io.Writer, v sliceValue, tstr string) os.Error {
@@ -58,7 +58,7 @@ func serializeSlice(wr io.Writer, v sliceValue, tstr string) os.Error {
 	}
 	n := v.Len()
 	for i := 0; i < n; i++ {
-		e := _serialize(wr, v.Elem(i))
+		e := _serialize(wr, v.Index(i))
 		if e != nil {
 			return e
 		}
@@ -74,45 +74,45 @@ func writeString(wr io.Writer, s string) os.Error {
 
 func _serialize(wr io.Writer, v reflect.Value) os.Error {
 	var e os.Error
-	switch vv := v.(type) {
-	case *reflect.IntValue:
-		_, e = io.WriteString(wr, "i:"+strconv.Itoa(int(vv.Get()))+";")
-	case *reflect.StringValue:
-		writeString(wr, vv.Get())
-	case *reflect.SliceValue:
+	switch v.Kind() {
+	case reflect.Int:
+		_, e = io.WriteString(wr, "i:"+strconv.Itoa(int(v.Int()))+";")
+	case reflect.String:
+		writeString(wr, v.String())
+	case reflect.Slice:
 		var tstr string
-		et := v.Type().(*reflect.SliceType).Elem()
-		switch et.(type) {
-		case *reflect.IntType:
+		et := v.Type().Elem()
+		switch et.Kind() {
+		case reflect.Int:
 			tstr = "i"
-		case *reflect.StringType:
+		case reflect.String:
 			tstr = "s"
-		case *reflect.InterfaceType:
+		case reflect.Interface:
 			tstr = "*"
 		default:
 			return os.NewError("only []int, []string, []interface{} are supported")
 		}
-		e = serializeSlice(wr, vv, "a"+tstr+strconv.Itoa(vv.Len()))
-	case *reflect.MapValue:
+		e = serializeSlice(wr, v, "a"+tstr+strconv.Itoa(v.Len()))
+	case reflect.Map:
 		var kstr string
 		var estr string
-		t := v.Type().(*reflect.MapType)
+		t := v.Type()
 		kt := t.Key()
-		switch kt.(type) {
-		case *reflect.IntType:
+		switch kt.Kind() {
+		case reflect.Int:
 			kstr = "i"
-		case *reflect.StringType:
+		case reflect.String:
 			kstr = "s"
 		default:
 			return os.NewError("only map[int] or map[string] are supported")
 		}
 		et := t.Elem()
-		switch et.(type) {
-		case *reflect.IntType:
+		switch et.Kind() {
+		case reflect.Int:
 			estr = "i"
-		case *reflect.StringType:
+		case reflect.String:
 			estr = "s"
-		case *reflect.InterfaceType:
+		case reflect.Interface:
 			estr = "*"
 		default:
 			return os.NewError("only map[]int, map[]string or map[]interface{} are supported")
@@ -121,26 +121,26 @@ func _serialize(wr io.Writer, v reflect.Value) os.Error {
 		if e != nil {
 			return e
 		}
-		keys := vv.Keys()
+		keys := v.MapKeys()
 		for _, k := range keys {
 			e := _serialize(wr, k)
 			if e != nil {
 				return e
 			}
-			e = _serialize(wr, vv.Elem(k))
+			e = _serialize(wr, v.MapIndex(k))
 			if e != nil {
 				return e
 			}
 		}
 		_, e = io.WriteString(wr, "}")
-	case *reflect.InterfaceValue:
-		e = _serialize(wr, vv.Elem())
-	case *reflect.PtrValue:
-		sv, ok := vv.Elem().(*reflect.StructValue)
-		if !ok {
+	case reflect.Interface:
+		e = _serialize(wr, v.Elem())
+	case reflect.Ptr:
+		sv := v.Elem()
+		if sv.Kind() != reflect.Struct {
 			return os.NewError("value not support")
 		}
-		t := sv.Type().(*reflect.StructType)
+		t := sv.Type()
 		n := t.NumField()
 		_, e := io.WriteString(wr, "t:{")
 		if e != nil {
@@ -164,14 +164,14 @@ func _serialize(wr io.Writer, v reflect.Value) os.Error {
 }
 
 func serialize(filename string, perm uint32, data interface{}) os.Error {
-	file, e := os.Open(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	file, e := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if e != nil {
 		return e
 	}
 
 	wr := bufio.NewWriter(file)
 
-	e = _serialize(wr, reflect.NewValue(data))
+	e = _serialize(wr, reflect.ValueOf(data))
 	wr.Flush()
 	file.Close()
 
@@ -391,7 +391,7 @@ FOR: for {
 }
 
 func deserialize(filename string) (interface{}, os.Error) {
-	file, e := os.Open(filename, os.O_RDONLY, 0)
+	file, e := os.Open(filename)
 	if e != nil {
 		return nil, e
 	}
