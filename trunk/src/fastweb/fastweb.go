@@ -85,16 +85,16 @@ type env struct {
 }
 
 type Upload struct {
-	File	 *os.File
+	File     *os.File
 	Filename string
 }
 
 type cookie struct {
-	value string
-	expire *time.Time
-	path string
-	domain string
-	secure bool
+	value    string
+	expire   *time.Time
+	path     string
+	domain   string
+	secure   bool
 	httpOnly bool
 }
 
@@ -111,8 +111,8 @@ type Controller struct {
 	Body        string
 	Form        map[string][]string
 	Upload      map[string][]*Upload
-	Cookies	    map[string]string
-	Session	    *Session
+	Cookies     map[string]string
+	Session     *Session
 	setCookies  map[string]*cookie
 	ctxt        ControllerInterface
 	Request     *fastcgi.Request
@@ -285,11 +285,11 @@ func (c *Controller) SetCookieFull(key string, value string, expire *time.Time, 
 	}
 
 	c.setCookies[key] = &cookie{
-		value: value,
-		expire: expire,
-		path: path,
-		domain: domain,
-		secure: secure,
+		value:    value,
+		expire:   expire,
+		path:     path,
+		domain:   domain,
+		secure:   secure,
 		httpOnly: httpOnly,
 	}
 }
@@ -368,9 +368,9 @@ func deTitleCase(s string) string {
 		for i, c := range s {
 			if c >= 'A' && c <= 'Z' {
 				if i > 0 {
-					o += "_";
+					o += "_"
 				}
-				o += strings.ToLower(string(c));
+				o += strings.ToLower(string(c))
 			} else {
 				o += string(c)
 			}
@@ -522,8 +522,8 @@ func (md *multipartReader) readStringUntil(delim []byte, checkEnd bool) (string,
 }
 
 type hdrInfo struct {
-	key string
-	val string
+	key     string
+	val     string
 	attribs map[string]string
 }
 
@@ -545,9 +545,9 @@ func parseHeader(line string) *hdrInfo {
 		case 1:
 			if c == ';' {
 				attribs = make(map[string]string)
-				hdr = &hdrInfo {
-					key: key,
-					val: strings.TrimSpace(line[j:i]),
+				hdr = &hdrInfo{
+					key:     key,
+					val:     strings.TrimSpace(line[j:i]),
 					attribs: attribs,
 				}
 				phase++
@@ -599,7 +599,6 @@ func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
 	return hdrs, nil
 }
 
-
 func (md *multipartReader) readBody() (string, os.Error) {
 	return md.readStringUntil(md.bd, true)
 }
@@ -615,9 +614,9 @@ func tempfile() (*os.File, os.Error) {
 	for {
 		var s string
 		for i := 0; i < 10; i++ {
-			s += string(pads[rand.Int() % len(pads)])
+			s += string(pads[rand.Int()%len(pads)])
 		}
-		file, e := os.OpenFile(tmpdir + "/fastweb." + s, os.O_WRONLY | os.O_CREATE | os.O_EXCL, 0600)
+		file, e := os.OpenFile(tmpdir+"/fastweb."+s, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if e == nil {
 			return file, e
 		}
@@ -678,7 +677,7 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 			file, _ = os.Open(fname)
 
 			vec.Push(&Upload{
-				File: file,
+				File:     file,
 				Filename: filename,
 			})
 		} else {
@@ -832,7 +831,7 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 		laction:     laction,
 		params:      params,
 		request:     r,
-		body:	     body,
+		body:        body,
 		form:        form,
 		upload:      upload,
 		cookies:     cookies,
@@ -852,9 +851,9 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		return NewError("PageNotFound", "controller class '"+env.controller+"' not found")
 	}
 
-    vc := reflect.New(cinfo.controllerType)
-    vi := reflect.New(cinfo.controllerPtrType).Elem()
-    vi.Set(vc.Elem().Addr())
+	vc := reflect.New(cinfo.controllerType)
+	vi := reflect.New(cinfo.controllerPtrType).Elem()
+	vi.Set(vc.Elem().Addr())
 	c := vi.Interface().(ControllerInterface)
 
 	if env.action == "" {
@@ -952,7 +951,7 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		if mt.NumOut() != 1 {
 			continue
 		}
-        mo := mt.Out(0)
+		mo := mt.Out(0)
 		switch mo.Kind() {
 		case reflect.Interface:
 			if mo.PkgPath() != "os" || mo.Name() != "Error" {
@@ -964,7 +963,7 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		nin := mt.NumIn() - 1
 		ptypes := make([]int, nin)
 		for j := 0; j < nin; j++ {
-            in := mt.In(j + 1)
+			in := mt.In(j + 1)
 			switch in.Kind() {
 			case reflect.Int:
 				ptypes[j] = IntParam
@@ -995,4 +994,3 @@ func (a *Application) Run(addr string) os.Error {
 	rand.Seed(time.Nanoseconds())
 	return fastcgi.RunStandalone(addr, a)
 }
-
