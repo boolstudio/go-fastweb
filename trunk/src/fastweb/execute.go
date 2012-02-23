@@ -33,14 +33,22 @@ func (t *Template) lookup(st *state, v reflect.Value, name string) reflect.Value
 	for v.IsValid() {
 		typ := v.Type()
 		if n := v.Type().NumMethod(); n > 0 {
+            var params []reflect.Value
+            parts := strings.SplitN(name, ":", 2)
+            name = parts[0]
+            nIn := 1
+            if len(parts) > 1 {
+                params = []reflect.Value{reflect.ValueOf(parts[1])}
+                nIn++
+            }
 			for i := 0; i < n; i++ {
 				m := typ.Method(i)
 				mtyp := m.Type
-				if m.Name == name && mtyp.NumIn() == 1 && mtyp.NumOut() == 1 {
+				if m.Name == name && mtyp.NumIn() == nIn && mtyp.NumOut() == 1 {
 					if !isExported(name) {
 						t.execError(st, t.linenum, "name not exported: %s in type %s", name, st.data.Type())
 					}
-					return v.Method(i).Call(nil)[0]
+					return v.Method(i).Call(params)[0]
 				}
 			}
 		}
