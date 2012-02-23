@@ -6,6 +6,8 @@ TARG=fastweb
 GOFILES=\
 	fastweb.go\
 	session.go\
-	template.go
+	parse.go\
+	execute.go\
+	format.go
 
 include ../Make.pkg

@@ -9,13 +9,7 @@
 #
 # to rebuild the dependency information in Make.deps.
 
-nullstring :=
-space := $(nullstring) # a space at the end
-ifndef GOBIN
-QUOTED_HOME=$(subst $(space),\ ,$(HOME))
-GOBIN=$(QUOTED_HOME)/bin
-endif
-QUOTED_GOBIN=$(subst $(space),\ ,$(GOBIN))
+include Make.inc
 
 all: install
 
@@ -23,13 +17,20 @@ DIRS=\
 	fastcgi\
 	fastweb\
 
-NOTEST=\
+NOTEST+=\
 	fastcgi\
 	fastweb\
 
-NOBENCH=\
+NOBENCH+=\
 	fastcgi\
 	fastweb\
+
+# Disable tests that windows cannot run yet.
+ifeq ($(GOOS),windows)
+NOTEST+=os/signal    # no signals
+NOTEST+=syslog       # no network
+NOTEST+=time         # no syscall.Kill, syscall.SIGCHLD for sleep tests
+endif
 
 TEST=\
 	$(filter-out $(NOTEST),$(DIRS))
@@ -41,22 +42,29 @@ clean.dirs: $(addsuffix .clean, $(DIRS))
 install.dirs: $(addsuffix .install, $(DIRS))
 nuke.dirs: $(addsuffix .nuke, $(DIRS))
 test.dirs: $(addsuffix .test, $(TEST))
+testshort.dirs: $(addsuffix .testshort, $(TEST))
 bench.dirs: $(addsuffix .bench, $(BENCH))
 
 %.clean:
-	+cd $* && $(QUOTED_GOBIN)/gomake clean
+	+$(MAKE) -C $* clean
 
 %.install:
-	+cd $* && $(QUOTED_GOBIN)/gomake install
+	+@echo install $*
+	+@$(MAKE) -C $* install.clean >$*/build.out 2>&1 || (echo INSTALL FAIL $*; cat $*/build.out; exit 1)
 
 %.nuke:
-	+cd $* && $(QUOTED_GOBIN)/gomake nuke
+	+$(MAKE) -C $* nuke
 
 %.test:
-	+cd $* && $(QUOTED_GOBIN)/gomake test
+	+@echo test $*
+	+@$(MAKE) -C $* test.clean >$*/test.out 2>&1 || (echo TEST FAIL $*; cat $*/test.out; exit 1)
+
+%.testshort:
+	+@echo test $*
+	+@$(MAKE) -C $* testshort.clean >$*/test.out 2>&1 || (echo TEST FAIL $*; cat $*/test.out; exit 1)
 
 %.bench:
-	+cd $* && $(QUOTED_GOBIN)/gomake bench
+	+$(MAKE) -C $* bench	
 
 clean: clean.dirs
 
@@ -64,7 +72,9 @@ install: install.dirs
 
 test:	test.dirs
 
-bench:	bench.dirs
+testshort: testshort.dirs
+
+bench:	bench.dirs ../../test/garbage.bench
 
 nuke: nuke.dirs
 	rm -rf "$(GOROOT)"/pkg/*
@@ -72,4 +82,8 @@ nuke: nuke.dirs
 deps:
 	./deps.bash
 
+echo-dirs:
+	@echo $(DIRS)
+
 -include Make.deps
+

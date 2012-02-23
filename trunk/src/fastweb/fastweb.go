@@ -10,7 +10,7 @@ import (
 	"container/vector"
 	"go-fastcgi.googlecode.com/svn/trunk/src/fastcgi"
 	"fmt"
-	"http"
+	"url"
 	"io"
 	"io/ioutil"
 	"log"
@@ -52,7 +52,7 @@ type ErrorStruct struct {
 
 type methodInfo struct {
 	name       string
-	method     *reflect.FuncValue
+	method     reflect.Value
 	nparams    int
 	paramTypes []int
 }
@@ -61,7 +61,7 @@ type controllerInfo struct {
 	name              string
 	controller        ControllerInterface
 	controllerType    reflect.Type
-	controllerPtrType *reflect.PtrType
+	controllerPtrType reflect.Type
 	methodMap         map[string]*methodInfo
 }
 
@@ -197,7 +197,7 @@ func (c *Controller) preRender() {
 
 		if c.setCookies != nil {
 			for k, ck := range c.setCookies {
-				s := "Set-Cookie: " + k + "=" + http.URLEscape(ck.value)
+				s := "Set-Cookie: " + k + "=" + url.QueryEscape(ck.value)
 				if ck.expire != nil {
 					s += "; expire=" + ck.expire.Format(time.RFC1123)
 				}
@@ -232,7 +232,7 @@ func (c *Controller) RenderContent() string {
 	}
 
 	if t != nil {
-		t.Execute(c.ctxt, c.Request.Stdout)
+		t.Execute(c.Request.Stdout, c.ctxt)
 	}
 
 	return ""
@@ -241,7 +241,7 @@ func (c *Controller) RenderContent() string {
 func (c *Controller) renderTemplate(fname string) {
 	t, e := loadTemplate(fname)
 	if e == nil {
-		t.Execute(c.ctxt, c.Request.Stdout)
+		t.Execute(c.Request.Stdout, c.ctxt)
 	} else {
 		log.Printf("failed to load template %s: %s", fname, e)
 	}
@@ -271,7 +271,7 @@ func (c *Controller) Render() {
 		log.Printf("failed to load layout template %s: %s", fname, e)
 		c.RenderContent()
 	} else {
-		t.Execute(c.ctxt, c.Request.Stdout)
+		t.Execute(c.Request.Stdout, c.ctxt)
 	}
 }
 
@@ -340,7 +340,7 @@ func (eh *ErrorHandler) RenderContent() string {
 		}
 		fmt.Fprintf(eh.Request.Stdout, "%s", msg)
 	} else {
-		t.Execute(eh, eh.Request.Stdout)
+		t.Execute(eh.Request.Stdout, eh)
 	}
 
 	return ""
@@ -348,7 +348,7 @@ func (eh *ErrorHandler) RenderContent() string {
 
 func titleCase(s string) string {
 	if len(s) > 0 {
-		parts := strings.Split(s, "_", -1)
+		parts := strings.Split(s, "_")
 		for i, p := range parts {
 			l := len(p)
 			if l > 0 {
@@ -386,17 +386,17 @@ func parseKeyValueString(m map[string]*vector.StringVector, s string) os.Error {
 	}
 
 	// copied from pkg/http/request.go
-	for _, kv := range strings.Split(s, "&", -1) {
+	for _, kv := range strings.Split(s, "&") {
 		if kv == "" {
 			continue
 		}
-		kvPair := strings.Split(kv, "=", 2)
+		kvPair := strings.SplitN(kv, "=", 2)
 
 		var key, value string
 		var e os.Error
-		key, e = http.URLUnescape(kvPair[0])
+		key, e = url.QueryUnescape(kvPair[0])
 		if e == nil && len(kvPair) > 1 {
-			value, e = http.URLUnescape(kvPair[1])
+			value, e = url.QueryUnescape(kvPair[1])
 		}
 		if e != nil {
 			return e
@@ -589,7 +589,7 @@ func parseHeader(line string) *hdrInfo {
 
 func (md *multipartReader) readHeaders() (map[string]*hdrInfo, os.Error) {
 	s, _ := md.readStringUntil(crlf2, false)
-	lines := strings.Split(s[2:len(s)], "\r\n", -1)
+	lines := strings.Split(s[2:len(s)], "\r\n")
 	hdrs := make(map[string]*hdrInfo)
 	for _, line := range lines {
 		if hdr := parseHeader(line); hdr != nil {
@@ -617,7 +617,7 @@ func tempfile() (*os.File, os.Error) {
 		for i := 0; i < 10; i++ {
 			s += string(pads[rand.Int() % len(pads)])
 		}
-		file, e := os.Open(tmpdir + "/fastweb." + s, os.O_WRONLY | os.O_CREATE | os.O_EXCL, 0600)
+		file, e := os.OpenFile(tmpdir + "/fastweb." + s, os.O_WRONLY | os.O_CREATE | os.O_EXCL, 0600)
 		if e == nil {
 			return file, e
 		}
@@ -675,7 +675,7 @@ func parseMultipartForm(m map[string]*vector.StringVector, u map[string]*vector.
 			wr.Flush()
 			// to flush (system) buffer, re-open immediately
 			file.Close()
-			file, _ = os.Open(fname, os.O_RDONLY, 0)
+			file, _ = os.Open(fname)
 
 			vec.Push(&Upload{
 				File: file,
@@ -769,7 +769,7 @@ func parseCookies(r *fastcgi.Request) (map[string]string, os.Error) {
 				}
 			case 1:
 				if c == ';' {
-					v, e := http.URLUnescape(s[j:i])
+					v, e := url.QueryUnescape(s[j:i])
 					if e != nil {
 						return cookies, e
 					}
@@ -790,13 +790,13 @@ func (a *Application) getEnv(r *fastcgi.Request) *env {
 	var laction string
 
 	path, _ := r.Params["REQUEST_URI"]
-	p := strings.Split(path, "?", 2)
+	p := strings.SplitN(path, "?", 2)
 	if len(p) > 1 {
 		path = p[0]
 		r.Params["QUERY_STRING"] = p[1]
 	}
 
-	pparts := strings.Split(path, "/", -1)
+	pparts := strings.Split(path, "/")
 	n := len(pparts)
 	if n > 1 {
 		lname = pparts[1]
@@ -852,9 +852,9 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		return NewError("PageNotFound", "controller class '"+env.controller+"' not found")
 	}
 
-	cval := reflect.NewValue(cinfo.controller)
-	cval.(*reflect.PtrValue).PointTo(reflect.MakeZero(cinfo.controllerType))
-	c := unsafe.Unreflect(cinfo.controllerPtrType, unsafe.Pointer(cval.Addr())).(ControllerInterface)
+	cval := reflect.Zero(cinfo.controllerPtrType)
+	cval.Set(reflect.Zero(cinfo.controllerType))
+	c := unsafe.Unreflect(cinfo.controllerPtrType, unsafe.Pointer(cval.UnsafeAddr())).(ControllerInterface)
 
 	if env.action == "" {
 		env.action = c.DefaultAction()
@@ -877,13 +877,13 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		p := env.params[i]
 		switch minfo.paramTypes[i] {
 		case StrParam:
-			pv[i+1] = reflect.NewValue(p)
+			pv[i+1] = reflect.ValueOf(p)
 		case IntParam:
 			x, e2 := strconv.Atoi(p)
 			if e2 != nil {
 				return NewError("PageNotFound", fmt.Sprintf("parameter %d must be an integer, input: %s", i+1, p))
 			}
-			pv[i+1] = reflect.NewValue(x)
+			pv[i+1] = reflect.ValueOf(x)
 		}
 	}
 
@@ -892,10 +892,10 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 
 	c.PreFilter()
 
-	eval := minfo.method.Call(pv)[0].(*reflect.InterfaceValue)
+	eval := minfo.method.Call(pv)[0]
 	if !eval.IsNil() {
 		elemval := eval.Elem()
-		return unsafe.Unreflect(elemval.Type(), unsafe.Pointer(elemval.Addr())).(os.Error)
+		return unsafe.Unreflect(elemval.Type(), unsafe.Pointer(elemval.UnsafeAddr())).(os.Error)
 	}
 
 	c.SetContext(c)
@@ -932,7 +932,7 @@ func NewApplication() *Application {
 }
 
 func (a *Application) RegisterController(c ControllerInterface) {
-	v := reflect.NewValue(c).(*reflect.PtrValue)
+	v := reflect.ValueOf(c)
 	pt := v.Type()
 	t := v.Elem().Type()
 	name := t.Name()
@@ -951,9 +951,10 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		if mt.NumOut() != 1 {
 			continue
 		}
-		switch d := mt.Out(0).(type) {
-		case *reflect.InterfaceType:
-			if d.PkgPath() != "os" || d.Name() != "Error" {
+        mo := mt.Out(0)
+		switch mo.Kind() {
+		case reflect.Interface:
+			if mo.PkgPath() != "os" || mo.Name() != "Error" {
 				continue
 			}
 		default:
@@ -962,10 +963,11 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		nin := mt.NumIn() - 1
 		ptypes := make([]int, nin)
 		for j := 0; j < nin; j++ {
-			switch mt.In(j + 1).(type) {
-			case *reflect.IntType:
+            in := mt.In(j + 1)
+			switch in.Kind() {
+			case reflect.Int:
 				ptypes[j] = IntParam
-			case *reflect.StringType:
+			case reflect.String:
 				ptypes[j] = StrParam
 			default:
 				continue
@@ -983,7 +985,7 @@ func (a *Application) RegisterController(c ControllerInterface) {
 		name:              name,
 		controller:        c,
 		controllerType:    t,
-		controllerPtrType: pt.(*reflect.PtrType),
+		controllerPtrType: pt,
 		methodMap:         mmap,
 	}
 }
