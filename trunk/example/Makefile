@@ -1,4 +1,4 @@
-include ../src/Make.inc
+include $(GOROOT)/src/Make.inc
 
 all: simple
 
@@ -8,6 +8,6 @@ clean:
 %.${O}: %.go
 	${GC} -I . $<
 
-%: %.${O} ../src/fastweb/_obj/fastweb.a ../src/fastcgi/_obj/fastcgi.a
+%: %.${O} ../src/fastweb/_obj/go-fastweb.googlecode.com/svn/trunk/src/fastweb.a
 	${LD} -L . -o $@ $<
 
