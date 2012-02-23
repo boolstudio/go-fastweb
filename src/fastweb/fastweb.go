@@ -852,9 +852,10 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 		return NewError("PageNotFound", "controller class '"+env.controller+"' not found")
 	}
 
-	cval := reflect.Zero(cinfo.controllerPtrType)
-	cval.Set(reflect.Zero(cinfo.controllerType))
-	c := unsafe.Unreflect(cinfo.controllerPtrType, unsafe.Pointer(cval.UnsafeAddr())).(ControllerInterface)
+    vc := reflect.New(cinfo.controllerType)
+    vi := reflect.New(cinfo.controllerPtrType).Elem()
+    vi.Set(vc.Elem().Addr())
+	c := vi.Interface().(ControllerInterface)
 
 	if env.action == "" {
 		env.action = c.DefaultAction()
@@ -871,7 +872,7 @@ func (a *Application) route(r *fastcgi.Request) os.Error {
 	}
 
 	pv := make([]reflect.Value, minfo.nparams+1)
-	pv[0] = cval
+	pv[0] = vc
 
 	for i := 0; i < minfo.nparams; i++ {
 		p := env.params[i]

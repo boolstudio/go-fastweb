@@ -1,10 +1,10 @@
-<%.section name%>
-Name: <%name%><br/>
-Manufacturer: <%brand%><br/>
-<%.section image%>
-<img src="<%image%>"><br/>
+<%.section Name%>
+Name: <%Name%><br/>
+Manufacturer: <%Brand%><br/>
+<%.section Image%>
+<img src="<%Image%>"><br/>
 <%.end%>
-<%.section features%>
+<%.section Features%>
 Features:<br/>
 <ul>
 <%.repeated section @%>
@@ -12,7 +12,7 @@ Features:<br/>
 <%.end%>
 </ul>
 <%.end%>
-<%.section specifications%>
+<%.section Specifications%>
 Specifications:<br/>
 <ul>
 <%.repeated section @%>

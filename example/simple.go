@@ -11,29 +11,29 @@ import (
 
 type Products struct {
 	fastweb.Controller
-	name string
-	brand string
-	features []string
-	specifications []string
-	image string
+	Name string
+	Brand string
+	Features []string
+	Specifications []string
+	Image string
 }
 
 func (p *Products) View(id string) os.Error {
 	if id == "ah64" {
-		p.name = "RC Apache AH64 4-Channel Electric Helicoper"
-		p.brand = "Colco"
-		p.features = []string{
+		p.Name = "RC Apache AH64 4-Channel Electric Helicoper"
+		p.Brand = "Colco"
+		p.Features = []string{
 			"4 channel radio control duel propeller system",
 			"Full movement controll: forward, backward, left, right, up and down",
 			"Replica design",
 			"Revolutionary co-axial rotor technology",
 		}
-		p.specifications = []string{
+		p.Specifications = []string{
 			"Dimensions: L 16 Inches X W 5.5 Inches x H 6.5 Inches",
 			"Battery Duration: 10 min",
 			"Range: 120 Feet",
 		}
-		p.image = "/img/ah64.jpg"
+		p.Image = "/img/ah64.jpg"
 	}
 	return nil
 }
