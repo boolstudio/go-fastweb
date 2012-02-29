@@ -33,14 +33,14 @@ func (t *Template) lookup(st *state, v reflect.Value, name string) reflect.Value
 	for v.IsValid() {
 		typ := v.Type()
 		if n := v.Type().NumMethod(); n > 0 {
-            var params []reflect.Value
-            parts := strings.SplitN(name, ":", 2)
-            name = parts[0]
-            nIn := 1
-            if len(parts) > 1 {
-                params = []reflect.Value{reflect.ValueOf(parts[1])}
-                nIn++
-            }
+			var params []reflect.Value
+			parts := strings.SplitN(name, ":", 2)
+			name = parts[0]
+			nIn := 1
+			if len(parts) > 1 {
+				params = []reflect.Value{reflect.ValueOf(parts[1])}
+				nIn++
+			}
 			for i := 0; i < n; i++ {
 				m := typ.Method(i)
 				mtyp := m.Type

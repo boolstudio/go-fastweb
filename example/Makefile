@@ -9,5 +9,5 @@ clean:
 	${GC} -I . $<
 
 %: %.${O} ../src/fastweb/_obj/go-fastweb.googlecode.com/svn/trunk/src/fastweb.a
-	${LD} -L . -o $@ $<
+	${LD} -L ../src/fastweb/_obj:. -o $@ $<
 

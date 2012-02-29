@@ -222,6 +222,13 @@ func (c *Controller) preRender() {
 	}
 }
 
+func executeTemplate(fname string, t *Template, w io.Writer, data interface{}) {
+	e := t.Execute(w, data)
+	if e != nil {
+		log.Printf("error occurred during executing template %s: %s", fname, e)
+	}
+}
+
 func (c *Controller) RenderContent() string {
 	c.preRender()
 
@@ -232,7 +239,7 @@ func (c *Controller) RenderContent() string {
 	}
 
 	if t != nil {
-		t.Execute(c.Request.Stdout, c.ctxt)
+		executeTemplate(fname, t, c.Request.Stdout, c.ctxt)
 	}
 
 	return ""
@@ -241,7 +248,7 @@ func (c *Controller) RenderContent() string {
 func (c *Controller) renderTemplate(fname string) {
 	t, e := loadTemplate(fname)
 	if e == nil {
-		t.Execute(c.Request.Stdout, c.ctxt)
+		executeTemplate(fname, t, c.Request.Stdout, c.ctxt)
 	} else {
 		log.Printf("failed to load template %s: %s", fname, e)
 	}
@@ -271,7 +278,7 @@ func (c *Controller) Render() {
 		log.Printf("failed to load layout template %s: %s", fname, e)
 		c.RenderContent()
 	} else {
-		t.Execute(c.Request.Stdout, c.ctxt)
+		executeTemplate(fname, t, c.Request.Stdout, c.ctxt)
 	}
 }
 
@@ -341,6 +348,7 @@ func (eh *ErrorHandler) RenderContent() string {
 		fmt.Fprintf(eh.Request.Stdout, "%s", msg)
 	} else {
 		t.Execute(eh.Request.Stdout, eh)
+		executeTemplate(fname, t, eh.Request.Stdout, eh)
 	}
 
 	return ""
